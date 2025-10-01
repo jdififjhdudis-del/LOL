@@ -1,0 +1,467 @@
+--[[
+    مكتبة MoonUI - واجهة متطورة وجميلة
+    تم التصميم لتقديم أفضل تجربة مستخدم
+]]
+
+local MoonUI = {}
+MoonUI.__index = MoonUI
+
+-- الألوان الأساسية
+MoonUI.Colors = {
+    Primary = Color3.fromRGB(114, 137, 218),
+    Secondary = Color3.fromRGB(78, 93, 148),
+    Success = Color3.fromRGB(67, 181, 129),
+    Danger = Color3.fromRGB(240, 71, 71),
+    Warning = Color3.fromRGB(255, 186, 0),
+    Dark = Color3.fromRGB(35, 39, 46),
+    Light = Color3.fromRGB(245, 245, 245)
+}
+
+-- إنشاء المكتبة الرئيسية
+function MoonUI:Create(config)
+    local self = setmetatable({}, MoonUI)
+    
+    -- الإعدادات الأساسية
+    self.Config = {
+        Name = config.Name or "MoonUI",
+        Keybind = config.Keybind or Enum.KeyCode.RightShift,
+        Theme = config.Theme or "Dark",
+        Position = config.Position or UDim2.new(0.5, -200, 0.5, -150)
+    }
+    
+    self.Elements = {}
+    self.Tabs = {}
+    self.IsOpen = false
+    
+    -- إنشاء الواجهة الرئيسية
+    self:CreateMainUI()
+    self:CreateWatermark()
+    self:CreateNotifications()
+    
+    return self
+end
+
+-- إنشاء الواجهة الرئيسية
+function MoonUI:CreateMainUI()
+    -- الشاشة الرئيسية
+    self.MainScreen = Instance.new("ScreenGui")
+    self.MainScreen.Name = "MoonUI"
+    self.MainScreen.ResetOnSpawn = false
+    self.MainScreen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    self.MainScreen.Parent = game:GetService("CoreGui")
+    
+    -- الخلفية الشفافة عند الفتح
+    self.Background = Instance.new("Frame")
+    self.Background.Size = UDim2.new(1, 0, 1, 0)
+    self.Background.BackgroundColor3 = Color3.new(0, 0, 0)
+    self.Background.BackgroundTransparency = 0.5
+    self.Background.Visible = false
+    self.Background.ZIndex = 1
+    self.Background.Parent = self.MainScreen
+    
+    -- النافذة الرئيسية
+    self.MainFrame = Instance.new("Frame")
+    self.MainFrame.Size = UDim2.new(0, 400, 0, 500)
+    self.MainFrame.Position = self.Config.Position
+    self.MainFrame.BackgroundColor3 = Color3.fromRGB(30, 33, 40)
+    self.MainFrame.ClipsDescendants = true
+    self.MainFrame.Visible = false
+    self.MainFrame.ZIndex = 2
+    self.MainFrame.Parent = self.MainScreen
+    
+    -- إضافة الزوايا المستديرة
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = self.MainFrame
+    
+    -- الظل
+    local shadow = Instance.new("UIStroke")
+    shadow.Color = Color3.new(0, 0, 0)
+    shadow.Thickness = 2
+    shadow.Transparency = 0.8
+    shadow.Parent = self.MainFrame
+    
+    -- رأس النافذة
+    self:CreateHeader()
+    
+    -- منطقة المحتوى
+    self:CreateContentArea()
+    
+    -- زر التبديل الجميل
+    self:CreateToggleButton()
+    
+    -- إعدادات الإدخال
+    self:SetupInput()
+end
+
+-- إنشاء رأس النافذة
+function MoonUI:CreateHeader()
+    local header = Instance.new("Frame")
+    header.Size = UDim2.new(1, 0, 0, 40)
+    header.BackgroundColor3 = Color3.fromRGB(25, 28, 35)
+    header.ZIndex = 3
+    header.Parent = self.MainFrame
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = header
+    
+    -- العنوان
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(0, 200, 1, 0)
+    title.Position = UDim2.new(0, 15, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = self.Config.Name
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.TextSize = 16
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.ZIndex = 4
+    title.Parent = header
+    
+    -- زر الإغلاق
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 30, 0, 30)
+    closeBtn.Position = UDim2.new(1, -35, 0.5, -15)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(240, 71, 71)
+    closeBtn.Text = "×"
+    closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.TextSize = 20
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.ZIndex = 4
+    closeBtn.Parent = header
+    
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 6)
+    btnCorner.Parent = closeBtn
+    
+    closeBtn.MouseButton1Click:Connect(function()
+        self:Toggle()
+    end)
+end
+
+-- إنشاء منطقة المحتوى
+function MoonUI:CreateContentArea()
+    -- تبويبات التنقل
+    self.TabButtonsFrame = Instance.new("Frame")
+    self.TabButtonsFrame.Size = UDim2.new(1, 0, 0, 50)
+    self.TabButtonsFrame.Position = UDim2.new(0, 0, 0, 40)
+    self.TabButtonsFrame.BackgroundColor3 = Color3.fromRGB(35, 38, 45)
+    self.TabButtonsFrame.ZIndex = 3
+    self.TabButtonsFrame.Parent = self.MainFrame
+    
+    -- منطقة المحتوى الرئيسية
+    self.ContentFrame = Instance.new("Frame")
+    self.ContentFrame.Size = UDim2.new(1, 0, 1, -90)
+    self.ContentFrame.Position = UDim2.new(0, 0, 0, 90)
+    self.ContentFrame.BackgroundTransparency = 1
+    self.ContentFrame.ZIndex = 2
+    self.ContentFrame.Parent = self.MainFrame
+    
+    self.TabContent = Instance.new("Frame")
+    self.TabContent.Size = UDim2.new(1, 0, 1, 0)
+    self.TabContent.BackgroundTransparency = 1
+    self.TabContent.Parent = self.ContentFrame
+    
+    local scrolling = Instance.new("ScrollingFrame")
+    scrolling.Size = UDim2.new(1, 0, 1, 0)
+    scrolling.BackgroundTransparency = 1
+    scrolling.ScrollBarThickness = 4
+    scrolling.ScrollBarImageColor3 = MoonUI.Colors.Primary
+    scrolling.Parent = self.TabContent
+    
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 10)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = scrolling
+end
+
+-- إنشاء زر تبديل جميل
+function MoonUI:CreateToggleButton()
+    self.ToggleButton = Instance.new("TextButton")
+    self.ToggleButton.Size = UDim2.new(0, 50, 0, 50)
+    self.ToggleButton.Position = UDim2.new(1, -60, 0, 20)
+    self.ToggleButton.BackgroundColor3 = MoonUI.Colors.Primary
+    self.ToggleButton.Text = "☾"
+    self.ToggleButton.TextColor3 = Color3.new(1, 1, 1)
+    self.ToggleButton.TextSize = 20
+    self.ToggleButton.Font = Enum.Font.GothamBold
+    self.ToggleButton.ZIndex = 10
+    self.ToggleButton.Parent = self.MainScreen
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = self.ToggleButton
+    
+    local shadow = Instance.new("UIStroke")
+    shadow.Color = Color3.new(0, 0, 0)
+    shadow.Thickness = 2
+    shadow.Transparency = 0.5
+    shadow.Parent = self.ToggleButton
+    
+    -- تأثيرات Hover
+    self.ToggleButton.MouseEnter:Connect(function()
+        game:GetService("TweenService"):Create(
+            self.ToggleButton,
+            TweenInfo.new(0.2),
+            {BackgroundColor3 = MoonUI.Colors.Secondary}
+        ):Play()
+    end)
+    
+    self.ToggleButton.MouseLeave:Connect(function()
+        game:GetService("TweenService"):Create(
+            self.ToggleButton,
+            TweenInfo.new(0.2),
+            {BackgroundColor3 = MoonUI.Colors.Primary}
+        ):Play()
+    end)
+    
+    self.ToggleButton.MouseButton1Click:Connect(function()
+        self:Toggle()
+    end)
+end
+
+-- إنشاء العلامة المائية
+function MoonUI:CreateWatermark()
+    self.Watermark = Instance.new("Frame")
+    self.Watermark.Size = UDim2.new(0, 200, 0, 30)
+    self.Watermark.Position = UDim2.new(0, 10, 0, 10)
+    self.Watermark.BackgroundColor3 = Color3.fromRGB(25, 28, 35)
+    self.Watermark.BackgroundTransparency = 0.3
+    self.Watermark.ZIndex = 5
+    self.Watermark.Parent = self.MainScreen
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = self.Watermark
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = "MoonUI │ FPS: 60 │ Ping: 20ms"
+    label.TextColor3 = Color3.new(1, 1, 1)
+    label.TextSize = 12
+    label.Font = Enum.Font.Gotham
+    label.Parent = self.Watermark
+end
+
+-- نظام الإشعارات
+function MoonUI:CreateNotifications()
+    self.NotificationFrame = Instance.new("Frame")
+    self.NotificationFrame.Size = UDim2.new(0, 300, 1, -20)
+    self.NotificationFrame.Position = UDim2.new(1, -320, 0, 10)
+    self.NotificationFrame.BackgroundTransparency = 1
+    self.NotificationFrame.ZIndex = 5
+    self.NotificationFrame.Parent = self.MainScreen
+    
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 10)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+    layout.Parent = self.NotificationFrame
+end
+
+-- إضافة إشعار
+function MoonUI:Notify(title, message, duration, notificationType)
+    duration = duration or 5
+    notificationType = notificationType or "Info"
+    
+    local colors = {
+        Info = MoonUI.Colors.Primary,
+        Success = MoonUI.Colors.Success,
+        Warning = MoonUI.Colors.Warning,
+        Error = MoonUI.Colors.Danger
+    }
+    
+    local notification = Instance.new("Frame")
+    notification.Size = UDim2.new(0, 300, 0, 80)
+    notification.BackgroundColor3 = Color3.fromRGB(35, 38, 45)
+    notification.ZIndex = 6
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = notification
+    
+    local accent = Instance.new("Frame")
+    accent.Size = UDim2.new(0, 4, 1, 0)
+    accent.BackgroundColor3 = colors[notificationType]
+    accent.Parent = notification
+    
+    -- محتوى الإشعار
+    local content = Instance.new("Frame")
+    content.Size = UDim2.new(1, -10, 1, -10)
+    content.Position = UDim2.new(0, 10, 0, 5)
+    content.BackgroundTransparency = 1
+    content.Parent = notification
+    
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, 0, 0, 20)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = title
+    titleLabel.TextColor3 = Color3.new(1, 1, 1)
+    titleLabel.TextSize = 14
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Parent = content
+    
+    local messageLabel = Instance.new("TextLabel")
+    messageLabel.Size = UDim2.new(1, 0, 1, -25)
+    messageLabel.Position = UDim2.new(0, 0, 0, 25)
+    messageLabel.BackgroundTransparency = 1
+    messageLabel.Text = message
+    messageLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    messageLabel.TextSize = 12
+    messageLabel.Font = Enum.Font.Gotham
+    messageLabel.TextXAlignment = Enum.TextXAlignment.Left
+    messageLabel.TextYAlignment = Enum.TextYAlignment.Top
+    messageLabel.TextWrapped = true
+    messageLabel.Parent = content
+    
+    notification.Parent = self.NotificationFrame
+    
+    -- تأثير الظهور
+    notification.Position = UDim2.new(1, 0, 0, 0)
+    game:GetService("TweenService"):Create(
+        notification,
+        TweenInfo.new(0.3),
+        {Position = UDim2.new(0, 0, 0, 0)}
+    ):Play()
+    
+    -- الإزالة التلقائية
+    task.spawn(function()
+        wait(duration)
+        game:GetService("TweenService"):Create(
+            notification,
+            TweenInfo.new(0.3),
+            {Position = UDim2.new(1, 0, 0, 0)}
+        ):Play()
+        wait(0.3)
+        notification:Destroy()
+    end)
+end
+
+-- إعدادات الإدخال
+function MoonUI:SetupInput()
+    local uis = game:GetService("UserInputService")
+    
+    uis.InputBegan:Connect(function(input, processed)
+        if not processed and input.KeyCode == self.Config.Keybind then
+            self:Toggle()
+        end
+    end)
+end
+
+-- تبديل فتح/إغلاق الواجهة
+function MoonUI:Toggle()
+    self.IsOpen = not self.IsOpen
+    
+    if self.IsOpen then
+        self.MainFrame.Visible = true
+        self.Background.Visible = true
+        
+        -- تأثير الظهور
+        self.MainFrame.Position = UDim2.new(0.5, -200, 0.5, -200)
+        self.MainFrame.Size = UDim2.new(0, 0, 0, 0)
+        
+        game:GetService("TweenService"):Create(
+            self.MainFrame,
+            TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+            {Size = UDim2.new(0, 400, 0, 500), Position = self.Config.Position}
+        ):Play()
+    else
+        -- تأثير الاختفاء
+        game:GetService("TweenService"):Create(
+            self.MainFrame,
+            TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.In),
+            {Size = UDim2.new(0, 0, 0, 0), Position = UDim2.new(0.5, 0, 0.5, 0)}
+        ):Play()
+        
+        wait(0.2)
+        self.MainFrame.Visible = false
+        self.Background.Visible = false
+    end
+end
+
+-- إنشاء تبويب جديد
+function MoonUI:CreateTab(name, icon)
+    local tab = {
+        Name = name,
+        Icon = icon,
+        Buttons = {},
+        Sections = {}
+    }
+    
+    table.insert(self.Tabs, tab)
+    self:UpdateTabButtons()
+    
+    return tab
+end
+
+-- تحديث أزرار التبويبات
+function MoonUI:UpdateTabButtons()
+    -- سيتم تنفيذ هذا لاحقاً
+end
+
+-- إضافة عناصر التحكم
+function MoonUI:AddButton(tab, config)
+    local button = {
+        Type = "Button",
+        Name = config.Name,
+        Callback = config.Callback
+    }
+    
+    table.insert(tab.Buttons, button)
+    return button
+end
+
+function MoonUI:AddToggle(tab, config)
+    local toggle = {
+        Type = "Toggle",
+        Name = config.Name,
+        Default = config.Default or false,
+        Callback = config.Callback
+    }
+    
+    table.insert(tab.Buttons, toggle)
+    return toggle
+end
+
+function MoonUI:AddSlider(tab, config)
+    local slider = {
+        Type = "Slider",
+        Name = config.Name,
+        Min = config.Min or 0,
+        Max = config.Max or 100,
+        Default = config.Default or 50,
+        Callback = config.Callback
+    }
+    
+    table.insert(tab.Buttons, slider)
+    return slider
+end
+
+-- مثال على الاستخدام:
+--[[
+local Moon = MoonUI:Create({
+    Name = "MoonUI Demo",
+    Keybind = Enum.KeyCode.RightShift,
+    Theme = "Dark"
+})
+
+local MainTab = Moon:CreateTab("Main", "⭐")
+Moon:AddButton(MainTab, {
+    Name = "Click Me!",
+    Callback = function()
+        Moon:Notify("Success", "Button clicked!", 3, "Success")
+    end
+})
+
+Moon:AddToggle(MainTab, {
+    Name = "Enable Feature",
+    Callback = function(value)
+        print("Toggle:", value)
+    end
+})
+]]
+
+return MoonUI
