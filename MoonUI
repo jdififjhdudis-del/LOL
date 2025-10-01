@@ -1,0 +1,610 @@
+-- 🌙 MoonUI Pro - النسخة الاحترافية
+local MoonUI = {}
+
+-- إصدار المكتبة
+MoonUI.Version = "v3.0.0 Professional"
+
+-- نظام الألوان النيون
+MoonUI.Themes = {
+    Cyber = {
+        Primary = Color3.fromRGB(0, 255, 255),
+        Secondary = Color3.fromRGB(255, 0, 255),
+        Background = Color3.fromRGB(10, 10, 20),
+        Card = Color3.fromRGB(20, 20, 30),
+        Text = Color3.fromRGB(255, 255, 255),
+        TextSecondary = Color3.fromRGB(200, 200, 220),
+        Accent = Color3.fromRGB(0, 255, 255),
+        Glow = Color3.fromRGB(0, 200, 255),
+        Success = Color3.fromRGB(0, 255, 128),
+        Error = Color3.fromRGB(255, 50, 50),
+        Warning = Color3.fromRGB(255, 255, 0)
+    },
+    Neon = {
+        Primary = Color3.fromRGB(255, 0, 255),
+        Secondary = Color3.fromRGB(0, 255, 255),
+        Background = Color3.fromRGB(15, 10, 20),
+        Card = Color3.fromRGB(25, 15, 30),
+        Text = Color3.fromRGB(255, 255, 255),
+        TextSecondary = Color3.fromRGB(220, 200, 220),
+        Accent = Color3.fromRGB(255, 0, 255),
+        Glow = Color3.fromRGB(200, 0, 200),
+        Success = Color3.fromRGB(0, 255, 128),
+        Error = Color3.fromRGB(255, 50, 50),
+        Warning = Color3.fromRGB(255, 255, 0)
+    }
+}
+
+-- وظيفة إنشاء الواجهة الرئيسية
+function MoonUI:Create(config)
+    local self = setmetatable({}, {__index = MoonUI})
+    
+    -- الإعدادات الأساسية
+    self.Config = {
+        Name = config.Name or "MoonUI Pro",
+        Keybind = config.Keybind or Enum.KeyCode.RightShift,
+        Theme = config.Theme or "Cyber",
+        AutoScale = config.AutoScale ~= false
+    }
+    
+    self.Elements = {}
+    self.Tabs = {}
+    self.IsOpen = false
+    self.CurrentTheme = MoonUI.Themes[self.Config.Theme]
+    self.ActiveTab = nil
+    
+    -- خدمات الروبلوكس
+    self.Players = game:GetService("Players")
+    self.TweenService = game:GetService("TweenService")
+    self.UserInputService = game:GetService("UserInputService")
+    self.RunService = game:GetService("RunService")
+    
+    -- إنشاء الواجهة
+    self:CreateMainUI()
+    self:SetupInput()
+    self:ShowIntroAnimation()
+    
+    return self
+end
+
+-- حساب الحجم المتجاوب
+function MoonUI:CalculateSize()
+    if not self.Config.AutoScale then
+        return UDim2.new(0, 800, 0, 500)
+    end
+    
+    local viewportSize = self.UserInputService:GetScreenResolution()
+    local baseSize = Vector2.new(1920, 1080)
+    
+    local scaleX = viewportSize.X / baseSize.X
+    local scaleY = viewportSize.Y / baseSize.Y
+    local scale = math.min(scaleX, scaleY) * 0.9
+    
+    scale = math.clamp(scale, 0.7, 1.2)
+    
+    return UDim2.new(0, 800 * scale, 0, 500 * scale)
+end
+
+-- إنشاء الواجهة الرئيسية
+function MoonUI:CreateMainUI()
+    -- الشاشة الرئيسية
+    self.MainScreen = Instance.new("ScreenGui")
+    self.MainScreen.Name = "MoonUI_Pro"
+    self.MainScreen.ResetOnSpawn = false
+    self.MainScreen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    self.MainScreen.DisplayOrder = 999
+    self.MainScreen.Parent = game:GetService("CoreGui")
+    
+    -- الخلفية الشفافة
+    self.Background = Instance.new("Frame")
+    self.Background.Size = UDim2.new(1, 0, 1, 0)
+    self.Background.BackgroundColor3 = Color3.new(0, 0, 0)
+    self.Background.BackgroundTransparency = 0.8
+    self.Background.Visible = false
+    self.Background.ZIndex = 1
+    self.Background.Parent = self.MainScreen
+    
+    -- النافذة الرئيسية (تصميم أفقي)
+    self.MainFrame = Instance.new("Frame")
+    self.MainFrame.Size = self:CalculateSize()
+    self.MainFrame.Position = UDim2.new(0.5, -self.MainFrame.Size.X.Offset/2, 0.5, -self.MainFrame.Size.Y.Offset/2)
+    self.MainFrame.BackgroundColor3 = self.CurrentTheme.Background
+    self.MainFrame.ClipsDescendants = true
+    self.MainFrame.Visible = false
+    self.MainFrame.ZIndex = 2
+    self.MainFrame.Parent = self.MainScreen
+    
+    -- الزوايا المستديرة
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 15)
+    corner.Parent = self.MainFrame
+    
+    -- تأثير النيون
+    local neonGlow = Instance.new("UIStroke")
+    neonGlow.Color = self.CurrentTheme.Glow
+    neonGlow.Thickness = 3
+    neonGlow.Transparency = 0.3
+    neonGlow.Parent = self.MainFrame
+    
+    self.NeonEffect = neonGlow
+    
+    -- إنشاء المكونات
+    self:CreateSidebar()
+    self:CreateContentArea()
+    self:CreateToggleButton()
+end
+
+-- إنشاء الشريط الجانبي
+function MoonUI:CreateSidebar()
+    -- الشريط الجانبي
+    self.Sidebar = Instance.new("Frame")
+    self.Sidebar.Size = UDim2.new(0, 200, 1, 0)
+    self.Sidebar.BackgroundColor3 = self.CurrentTheme.Card
+    self.Sidebar.ZIndex = 3
+    self.Sidebar.Parent = self.MainFrame
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 15)
+    corner.Parent = self.Sidebar
+    
+    -- تأثير النيون للشريط الجانبي
+    local sidebarGlow = Instance.new("UIStroke")
+    sidebarGlow.Color = self.CurrentTheme.Primary
+    sidebarGlow.Thickness = 2
+    sidebarGlow.Transparency = 0.5
+    sidebarGlow.Parent = self.Sidebar
+    
+    -- رأس الشريط الجانبي
+    local sidebarHeader = Instance.new("Frame")
+    sidebarHeader.Size = UDim2.new(1, 0, 0, 80)
+    sidebarHeader.BackgroundColor3 = self.CurrentTheme.Background
+    sidebarHeader.ZIndex = 4
+    sidebarHeader.Parent = self.Sidebar
+    
+    local headerCorner = Instance.new("UICorner")
+    headerCorner.CornerRadius = UDim.new(0, 15)
+    headerCorner.Parent = sidebarHeader
+    
+    -- الشعار
+    local logo = Instance.new("TextLabel")
+    logo.Size = UDim2.new(1, 0, 0, 50)
+    logo.Position = UDim2.new(0, 0, 0, 15)
+    logo.BackgroundTransparency = 1
+    logo.Text = "🌙 MOONUI"
+    logo.TextColor3 = self.CurrentTheme.Primary
+    logo.TextSize = 20
+    logo.Font = Enum.Font.GothamBlack
+    logo.ZIndex = 5
+    logo.Parent = sidebarHeader
+    
+    -- وصف الشعار
+    local subtitle = Instance.new("TextLabel")
+    subtitle.Size = UDim2.new(1, 0, 0, 20)
+    subtitle.Position = UDim2.new(0, 0, 0, 45)
+    subtitle.BackgroundTransparency = 1
+    subtitle.Text = "PROFESSIONAL"
+    subtitle.TextColor3 = self.CurrentTheme.TextSecondary
+    subtitle.TextSize = 10
+    subtitle.Font = Enum.Font.GothamBold
+    subtitle.ZIndex = 5
+    subtitle.Parent = sidebarHeader
+    
+    -- منطقة تبويبات الشريط الجانبي
+    self.TabContainer = Instance.new("ScrollingFrame")
+    self.TabContainer.Size = UDim2.new(1, 0, 1, -80)
+    self.TabContainer.Position = UDim2.new(0, 0, 0, 80)
+    self.TabContainer.BackgroundTransparency = 1
+    self.TabContainer.ScrollBarThickness = 0
+    self.TabContainer.ZIndex = 3
+    self.TabContainer.Parent = self.Sidebar
+    
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 5)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = self.TabContainer
+end
+
+-- إنشاء منطقة المحتوى
+function MoonUI:CreateContentArea()
+    -- منطقة المحتوى الرئيسية
+    self.ContentArea = Instance.new("Frame")
+    self.ContentArea.Size = UDim2.new(1, -200, 1, 0)
+    self.ContentArea.Position = UDim2.new(0, 200, 0, 0)
+    self.ContentArea.BackgroundTransparency = 1
+    self.ContentArea.ZIndex = 2
+    self.ContentArea.Parent = self.MainFrame
+    
+    -- رأس المحتوى
+    self.ContentHeader = Instance.new("Frame")
+    self.ContentHeader.Size = UDim2.new(1, 0, 0, 60)
+    self.ContentHeader.BackgroundColor3 = self.CurrentTheme.Card
+    self.ContentHeader.ZIndex = 3
+    self.ContentHeader.Parent = self.ContentArea
+    
+    local headerCorner = Instance.new("UICorner")
+    headerCorner.CornerRadius = UDim.new(0, 10)
+    headerCorner.Parent = self.ContentHeader
+    
+    -- عنوان المحتوى
+    self.ContentTitle = Instance.new("TextLabel")
+    self.ContentTitle.Size = UDim2.new(1, -20, 1, 0)
+    self.ContentTitle.Position = UDim2.new(0, 20, 0, 0)
+    self.ContentTitle.BackgroundTransparency = 1
+    self.ContentTitle.Text = "مرحباً في MoonUI Pro"
+    self.ContentTitle.TextColor3 = self.CurrentTheme.Text
+    self.ContentTitle.TextSize = 18
+    self.ContentTitle.Font = Enum.Font.GothamBold
+    self.ContentTitle.TextXAlignment = Enum.TextXAlignment.Left
+    self.ContentTitle.ZIndex = 4
+    self.ContentTitle.Parent = self.ContentHeader
+    
+    -- وصف المحتوى
+    self.ContentDescription = Instance.new("TextLabel")
+    self.ContentDescription.Size = UDim2.new(1, -20, 0, 20)
+    self.ContentDescription.Position = UDim2.new(0, 20, 0, 35)
+    self.ContentDescription.BackgroundTransparency = 1
+    self.ContentDescription.Text = "اختر تبويباً من الشريط الجانبي للبدء"
+    self.ContentDescription.TextColor3 = self.CurrentTheme.TextSecondary
+    self.ContentDescription.TextSize = 12
+    self.ContentDescription.Font = Enum.Font.Gotham
+    self.ContentDescription.TextXAlignment = Enum.TextXAlignment.Left
+    self.ContentDescription.ZIndex = 4
+    self.ContentDescription.Parent = self.ContentHeader
+    
+    -- منطقة محتوى التبويبات
+    self.TabContentArea = Instance.new("Frame")
+    self.TabContentArea.Size = UDim2.new(1, 0, 1, -60)
+    self.TabContentArea.Position = UDim2.new(0, 0, 0, 60)
+    self.TabContentArea.BackgroundTransparency = 1
+    self.TabContentArea.ZIndex = 2
+    self.TabContentArea.Parent = self.ContentArea
+    
+    -- إطار التمرير للمحتوى
+    self.ContentScrolling = Instance.new("ScrollingFrame")
+    self.ContentScrolling.Size = UDim2.new(1, -20, 1, -20)
+    self.ContentScrolling.Position = UDim2.new(0, 10, 0, 10)
+    self.ContentScrolling.BackgroundTransparency = 1
+    self.ContentScrolling.ScrollBarThickness = 4
+    self.ContentScrolling.ScrollBarImageColor3 = self.CurrentTheme.Primary
+    self.ContentScrolling.ZIndex = 2
+    self.ContentScrolling.Parent = self.TabContentArea
+    
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 15)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = self.ContentScrolling
+    
+    local padding = Instance.new("UIPadding")
+    padding.PaddingLeft = UDim.new(0, 5)
+    padding.PaddingRight = UDim.new(0, 5)
+    padding.PaddingTop = UDim.new(0, 5)
+    padding.Parent = self.ContentScrolling
+end
+
+-- إنشاء زر التبديل المتطور
+function MoonUI:CreateToggleButton()
+    self.ToggleButton = Instance.new("TextButton")
+    self.ToggleButton.Size = UDim2.new(0, 70, 0, 70)
+    self.ToggleButton.Position = UDim2.new(1, -90, 0, 20)
+    self.ToggleButton.BackgroundColor3 = self.CurrentTheme.Primary
+    self.ToggleButton.Text = "🌙"
+    self.ToggleButton.TextColor3 = Color3.new(1, 1, 1)
+    self.ToggleButton.TextSize = 30
+    self.ToggleButton.Font = Enum.Font.GothamBlack
+    self.ToggleButton.ZIndex = 10
+    self.ToggleButton.Parent = self.MainScreen
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1, 0)
+    corner.Parent = self.ToggleButton
+    
+    -- تأثير النيون للزر
+    local buttonGlow = Instance.new("UIStroke")
+    buttonGlow.Color = self.CurrentTheme.Glow
+    buttonGlow.Thickness = 3
+    buttonGlow.Transparency = 0.3
+    buttonGlow.Parent = self.ToggleButton
+    
+    -- تأثير الوميض
+    task.spawn(function()
+        while true do
+            task.wait(2)
+            self.TweenService:Create(
+                buttonGlow,
+                TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
+                {Transparency = 0.7}
+            ):Play()
+            task.wait(0.5)
+            self.TweenService:Create(
+                buttonGlow,
+                TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut),
+                {Transparency = 0.3}
+            ):Play()
+        end
+    end)
+    
+    self.ToggleButton.MouseButton1Click:Connect(function()
+        self:Toggle()
+    end)
+end
+
+-- إنشاء تبويب جديد
+function MoonUI:CreateTab(name, icon)
+    local tab = {
+        Name = name,
+        Icon = icon or "⭐",
+        Elements = {}
+    }
+    
+    -- إنشاء زر التبويب في الشريط الجانبي
+    local tabButton = Instance.new("TextButton")
+    tabButton.Size = UDim2.new(1, -20, 0, 50)
+    tabButton.Position = UDim2.new(0, 10, 0, #self.Tabs * 55)
+    tabButton.BackgroundColor3 = self.CurrentTheme.Card
+    tabButton.Text = ""
+    tabButton.LayoutOrder = #self.Tabs + 1
+    tabButton.ZIndex = 3
+    tabButton.Parent = self.TabContainer
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = tabButton
+    
+    -- تأثير النيون للتبويب
+    local tabGlow = Instance.new("UIStroke")
+    tabGlow.Color = self.CurrentTheme.Primary
+    tabGlow.Thickness = 1
+    tabGlow.Transparency = 0.8
+    tabGlow.Parent = tabButton
+    
+    -- أيقونة التبويب
+    local tabIcon = Instance.new("TextLabel")
+    tabIcon.Size = UDim2.new(0, 30, 0, 30)
+    tabIcon.Position = UDim2.new(0, 15, 0.5, -15)
+    tabIcon.BackgroundTransparency = 1
+    tabIcon.Text = icon or "⭐"
+    tabIcon.TextColor3 = self.CurrentTheme.TextSecondary
+    tabIcon.TextSize = 16
+    tabIcon.Font = Enum.Font.GothamBold
+    tabIcon.ZIndex = 4
+    tabIcon.Parent = tabButton
+    
+    -- اسم التبويب
+    local tabName = Instance.new("TextLabel")
+    tabName.Size = UDim2.new(1, -60, 1, 0)
+    tabName.Position = UDim2.new(0, 50, 0, 0)
+    tabName.BackgroundTransparency = 1
+    tabName.Text = name
+    tabName.TextColor3 = self.CurrentTheme.Text
+    tabName.TextSize = 14
+    tabName.Font = Enum.Font.Gotham
+    tabName.TextXAlignment = Enum.TextXAlignment.Left
+    tabName.ZIndex = 4
+    tabName.Parent = tabButton
+    
+    -- أحداث التبويب
+    tabButton.MouseEnter:Connect(function()
+        if self.ActiveTab ~= tab then
+            self.TweenService:Create(
+                tabButton,
+                TweenInfo.new(0.2),
+                {BackgroundColor3 = Color3.fromRGB(30, 30, 40)}
+            ):Play()
+        end
+    end)
+    
+    tabButton.MouseLeave:Connect(function()
+        if self.ActiveTab ~= tab then
+            self.TweenService:Create(
+                tabButton,
+                TweenInfo.new(0.2),
+                {BackgroundColor3 = self.CurrentTheme.Card}
+            ):Play()
+        end
+    end)
+    
+    tabButton.MouseButton1Click:Connect(function()
+        self:SwitchTab(tab)
+    end)
+    
+    tab.Button = tabButton
+    tab.Glow = tabGlow
+    table.insert(self.Tabs, tab)
+    
+    -- إذا كان هذا أول تبويب، فعّله
+    if #self.Tabs == 1 then
+        self:SwitchTab(tab)
+    end
+    
+    return tab
+end
+
+-- تبديل التبويب
+function MoonUI:SwitchTab(tab)
+    -- إعادة تعيين جميع التبويبات
+    for _, otherTab in pairs(self.Tabs) do
+        self.TweenService:Create(
+            otherTab.Button,
+            TweenInfo.new(0.3),
+            {
+                BackgroundColor3 = self.CurrentTheme.Card,
+                Size = UDim2.new(1, -20, 0, 50)
+            }
+        ):Play()
+        
+        self.TweenService:Create(
+            otherTab.Glow,
+            TweenInfo.new(0.3),
+            {Transparency = 0.8}
+        ):Play()
+    end
+    
+    -- تفعيل التبويب المحدد
+    self.TweenService:Create(
+        tab.Button,
+        TweenInfo.new(0.3),
+        {
+            BackgroundColor3 = self.CurrentTheme.Primary,
+            Size = UDim2.new(1, -10, 0, 55)
+        }
+    ):Play()
+    
+    self.TweenService:Create(
+        tab.Glow,
+        TweenInfo.new(0.3),
+        {Transparency = 0.3}
+    ):Play()
+    
+    -- تحديث العنوان والوصف
+    self.ContentTitle.Text = tab.Name
+    self.ContentDescription.Text = "تبويب " .. tab.Name .. " - MoonUI Pro"
+    
+    -- مسح المحتوى السابق
+    for _, child in pairs(self.ContentScrolling:GetChildren()) do
+        if child:IsA("Frame") then
+            child:Destroy()
+        end
+    end
+    
+    -- إضافة عناصر التبويب
+    for _, element in pairs(tab.Elements) do
+        self:CreateElement(element, self.ContentScrolling)
+    end
+    
+    self.ActiveTab = tab
+end
+
+-- إنشاء عناصر الواجهة
+function MoonUI:CreateElement(element, parent)
+    if element.Type == "Button" then
+        self:CreateButtonElement(element, parent)
+    elseif element.Type == "Toggle" then
+        self:CreateToggleElement(element, parent)
+    elseif element.Type == "Slider" then
+        self:CreateSliderElement(element, parent)
+    elseif element.Type == "Section" then
+        self:CreateSectionElement(element, parent)
+    end
+end
+
+-- إنشاء زر
+function MoonUI:CreateButtonElement(element, parent)
+    local buttonFrame = Instance.new("Frame")
+    buttonFrame.Size = UDim2.new(1, 0, 0, 50)
+    buttonFrame.BackgroundColor3 = self.CurrentTheme.Card
+    buttonFrame.LayoutOrder = #parent:GetChildren()
+    buttonFrame.Parent = parent
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = buttonFrame
+    
+    local glow = Instance.new("UIStroke")
+    glow.Color = self.CurrentTheme.Primary
+    glow.Thickness = 1
+    glow.Transparency = 0.7
+    glow.Parent = buttonFrame
+    
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(1, 0, 1, 0)
+    button.BackgroundTransparency = 1
+    button.Text = element.Name
+    button.TextColor3 = self.CurrentTheme.Text
+    button.TextSize = 14
+    button.Font = Enum.Font.Gotham
+    button.Parent = buttonFrame
+    
+    -- تأثيرات Hover
+    button.MouseEnter:Connect(function()
+        self.TweenService:Create(
+            buttonFrame,
+            TweenInfo.new(0.2),
+            {BackgroundColor3 = Color3.fromRGB(40, 40, 50)}
+        ):Play()
+        
+        self.TweenService:Create(
+            glow,
+            TweenInfo.new(0.2),
+            {Transparency = 0.3}
+        ):Play()
+    end)
+    
+    button.MouseLeave:Connect(function()
+        self.TweenService:Create(
+            buttonFrame,
+            TweenInfo.new(0.2),
+            {BackgroundColor3 = self.CurrentTheme.Card}
+        ):Play()
+        
+        self.TweenService:Create(
+            glow,
+            TweenInfo.new(0.2),
+            {Transparency = 0.7}
+        ):Play()
+    end)
+    
+    button.MouseButton1Click:Connect(function()
+        if element.Callback then
+            element.Callback()
+        end
+    end)
+    
+    table.insert(self.Elements, buttonFrame)
+end
+
+-- إنشاء مفتاح تبديل
+function MoonUI:CreateToggleElement(element, parent)
+    local toggleFrame = Instance.new("Frame")
+    toggleFrame.Size = UDim2.new(1, 0, 0, 50)
+    toggleFrame.BackgroundColor3 = self.CurrentTheme.Card
+    toggleFrame.LayoutOrder = #parent:GetChildren()
+    toggleFrame.Parent = parent
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = toggleFrame
+    
+    local glow = Instance.new("UIStroke")
+    glow.Color = self.CurrentTheme.Primary
+    glow.Thickness = 1
+    glow.Transparency = 0.7
+    glow.Parent = toggleFrame
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0.7, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = element.Name
+    label.TextColor3 = self.CurrentTheme.Text
+    label.TextSize = 14
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = toggleFrame
+    
+    local padding = Instance.new("UIPadding")
+    padding.PaddingLeft = UDim.new(0, 15)
+    padding.Parent = label
+    
+    local toggleButton = Instance.new("TextButton")
+    toggleButton.Size = UDim2.new(0, 60, 0, 30)
+    toggleButton.Position = UDim2.new(1, -75, 0.5, -15)
+    toggleButton.BackgroundColor3 = element.Default and self.CurrentTheme.Success or Color3.fromRGB(80, 80, 80)
+    toggleButton.Text = ""
+    toggleButton.Parent = toggleFrame
+    
+    local toggleCorner = Instance.new("UICorner")
+    toggleCorner.CornerRadius = UDim.new(1, 0)
+    toggleCorner.Parent = toggleButton
+    
+    local toggleGlow = Instance.new("UIStroke")
+    toggleGlow.Color = element.Default and self.CurrentTheme.Success or self.CurrentTheme.Primary
+    toggleGlow.Thickness = 2
+    toggleGlow.Transparency = 0.5
+    toggleGlow.Parent = toggleButton
+    
+    local toggleState = element.Default
+    
+    toggleButton.MouseButton1Click:Connect(function()
+        toggleState = not toggleState
+        self.TweenService:Create(
+            toggleButton,
+            TweenInfo.new(0.2),
+            {BackgroundColor3 = toggleState and self.CurrentTheme.Success
