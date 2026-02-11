@@ -1,7 +1,7 @@
 {
-  "name": "roblox-telegram-bot-ultimate",
-  "version": "7.0.0",
-  "description": "بوت Roblox – مع Axios وإعادة محاولة ذكية",
+  "name": "roblox-bot-simple",
+  "version": "1.0.0",
+  "description": "بوت Roblox – دخول مباشر فقط",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -9,9 +9,6 @@
   "dependencies": {
     "node-telegram-bot-api": "^0.61.0",
     "sqlite3": "^5.1.4",
-    "axios": "^1.6.2",
-    "axios-retry": "^3.8.0"
-  },
-  "author": "للتعليم فقط",
-  "license": "MIT"
+    "axios": "^1.6.2"
+  }
 }
