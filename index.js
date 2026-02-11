@@ -58,45 +58,39 @@ async function verifyRobloxCookie(cookie) {
 }
 
 /**
- * دالة ذكية للدخول إلى اللعبة - تتعامل مع XSRF تلقائياً
+ * دالة الانضمام – تدعم الرابط الجديد وتلقائي جلب الخوادم
  */
 async function joinRobloxGame(cookie, placeId) {
-    // الخطوة 1: جلب رمز XSRF من أي طلب GET
+    // 1. جلب رمز XSRF
     let xsrfToken = '';
     try {
         const xsrfRes = await fetch('https://www.roblox.com/home', {
-            headers: {
-                'Cookie': `.ROBLOSECURITY=${cookie};`,
-                'User-Agent': 'Mozilla/5.0'
-            }
+            headers: { 'Cookie': `.ROBLOSECURITY=${cookie};`, 'User-Agent': 'Mozilla/5.0' }
         });
         xsrfToken = xsrfRes.headers.get('x-csrf-token') || '';
-    } catch (e) {
-        // نتجاهل الخطأ، قد لا نحتاج الرمز
-    }
+    } catch (e) {}
 
-    // الخطوة 2: إرسال طلب الانضمام مع الرمز إن وجد
+    // الهيدرات الأساسية
     const headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Cookie': `.ROBLOSECURITY=${cookie};`,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     };
-    if (xsrfToken) {
-        headers['X-CSRF-TOKEN'] = xsrfToken;
-    }
+    if (xsrfToken) headers['X-CSRF-TOKEN'] = xsrfToken;
 
-    let res = await fetch('https://www.roblox.com/game/join.ashx', {
+    // المحاولة الأولى – الرابط الجديد بدون .ashx
+    let res = await fetch('https://www.roblox.com/game/join', {
         method: 'POST',
         headers: headers,
         body: new URLSearchParams({ placeId: placeId.toString() })
     });
 
-    // الخطوة 3: إذا كان الرد 403 بسبب XSRF، نجلب الرمز من الرد ونعيد المحاولة
+    // معالجة XSRF إن لزم
     if (res.status === 403) {
-        const newXsrfToken = res.headers.get('x-csrf-token');
-        if (newXsrfToken) {
-            headers['X-CSRF-TOKEN'] = newXsrfToken;
-            res = await fetch('https://www.roblox.com/game/join.ashx', {
+        const newXsrf = res.headers.get('x-csrf-token');
+        if (newXsrf) {
+            headers['X-CSRF-TOKEN'] = newXsrf;
+            res = await fetch('https://www.roblox.com/game/join', {
                 method: 'POST',
                 headers: headers,
                 body: new URLSearchParams({ placeId: placeId.toString() })
@@ -104,25 +98,57 @@ async function joinRobloxGame(cookie, placeId) {
         }
     }
 
-    // الخطوة 4: التحقق من النتيجة
-    if (!res.ok) {
+    // إذا نجحنا – رجعنا
+    if (res.ok) {
         const text = await res.text();
-        throw new Error(`HTTP ${res.status}: ${text.substring(0, 200)}`);
+        if (text.includes('OK')) return { success: true };
     }
 
-    const text = await res.text();
-    if (text.includes('OK')) {
-        return { success: true };
-    } else {
-        throw new Error('Roblox رفض الانضمام: ' + text.substring(0, 100));
+    // إذا فشل (404 أو غيره) – نجرب جلب خادم ونستخدم jobId
+    if (res.status === 404 || !res.ok) {
+        // جلب خادم عام
+        const serverRes = await fetch(
+            `https://games.roblox.com/v1/games/${placeId}/servers/Public?limit=1`,
+            { headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` } }
+        );
+        if (!serverRes.ok) throw new Error(`فشل جلب الخوادم (${serverRes.status})`);
+        const serverData = await serverRes.json();
+        if (!serverData.data || serverData.data.length === 0)
+            throw new Error('لا توجد خوادم عامة متاحة حالياً.');
+
+        const server = serverData.data[0];
+        const jobId = server.jobId || server.id;
+
+        // محاولة الانضمام مع jobId
+        const joinWithJobRes = await fetch('https://www.roblox.com/game/join', {
+            method: 'POST',
+            headers: headers,
+            body: new URLSearchParams({
+                placeId: placeId.toString(),
+                jobId: jobId
+            })
+        });
+
+        if (!joinWithJobRes.ok) {
+            const text = await joinWithJobRes.text();
+            throw new Error(`فشل الانضمام مع jobId: ${joinWithJobRes.status} ${text.substring(0, 100)}`);
+        }
+
+        const text = await joinWithJobRes.text();
+        if (text.includes('OK')) return { success: true, jobId: jobId };
+        throw new Error('Roblox رفض الانضمام حتى مع jobId');
     }
+
+    // كل شيء فشل
+    const errorText = await res.text();
+    throw new Error(`HTTP ${res.status}: ${errorText.substring(0, 200)}`);
 }
 
 // ------------------- أوامر البوت -------------------
 bot.onText(/\/start/, (msg) => {
     bot.sendMessage(msg.chat.id,
-        `🔐 *بوت Roblox – الإصدار النهائي*\n\n` +
-        `✅ *تم حل مشكلة XSRF Token*\n\n` +
+        `🔐 *بوت Roblox – النسخة النهائية*\n\n` +
+        `✅ *يدعم رابط Roblox الجديد (مارس 2026)*\n\n` +
         `📋 *الأوامر:*\n` +
         `/setcookie - إدخال كوكيز حساب وهمي\n` +
         `/joingame [رقم] - دخول لعبة عامة\n` +
@@ -231,8 +257,10 @@ bot.onText(/\/joingame (\d+)/, async (msg, match) => {
                 errorMsg += '\n\n⏳ *تم تجاوز الحد المسموح*. انتظر دقيقة ثم حاول مجدداً.';
             } else if (e.message.includes('403')) {
                 errorMsg += '\n\n🛡️ *مشكلة XSRF تم حلها تلقائياً* – إذا استمرت، جرب تحديث الكوكيز.';
-            } else if (e.message.includes('400')) {
-                errorMsg += '\n\n🎮 *رقم اللعبة غير صالح* – تأكد أنك تستخدم رقماً صحيحاً للعبة عامة.';
+            } else if (e.message.includes('404')) {
+                errorMsg += '\n\n🌐 *رابط الانضمام تغير – البوت يستخدم الرابط الجديد تلقائياً*. إذا استمرت، أبلغ المطور.';
+            } else if (e.message.includes('لا توجد خوادم')) {
+                errorMsg += '\n\n🎮 *اللعبة ليس لديها خوادم عامة الآن*. جرب لعبة أخرى.';
             }
 
             bot.sendMessage(chatId, errorMsg, { parse_mode: 'Markdown' });
@@ -302,4 +330,4 @@ process.on('SIGTERM', () => {
     process.exit();
 });
 
-console.log('✅ البوت جاهز – مع دعم XSRF Token');
+console.log('✅ البوت جاهز – مع دعم الرابط الجديد وجلب الخوادم');
