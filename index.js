@@ -1,23 +1,35 @@
+// =====================================================
+// بوت تليجرام – دخول Roblox
+// الإصدار النهائي الخارق
+// • 3 استراتيجيات انضمام
+// • معالجة أخطاء احترافية
+// • دعم كامل لتغييرات Roblox API
+// • جلب الخوادم بذكاء مع إعادة المحاولة
+// • تخزين مؤقت ومشفر للكوكيز
+// =====================================================
+
 const crypto = require('crypto');
 const TelegramBot = require('node-telegram-bot-api');
 const sqlite3 = require('sqlite3').verbose();
 
+// ---------- التحقق من المتغيرات الأساسية ----------
 if (!process.env.TELEGRAM_TOKEN) {
-    console.error('❌ TELEGRAM_TOKEN غير موجود');
+    console.error('❌ خطأ فادح: TELEGRAM_TOKEN غير موجود في متغيرات Railway');
     process.exit(1);
 }
 
 const TOKEN = process.env.TELEGRAM_TOKEN;
 const ADMIN_ID = process.env.ADMIN_USER_ID || null;
 const ENCRYPTION_KEY = crypto.createHash('sha256')
-    .update(process.env.ENCRYPTION_KEY || 'change-this-key-now')
+    .update(process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex'))
     .digest();
 const ALGORITHM = 'aes-256-cbc';
 
 const bot = new TelegramBot(TOKEN, { polling: true });
-const db = new sqlite3.Database(':memory:');
+const db = new sqlite3.Database(':memory:'); // بيانات مؤقتة
 
-db.run(`CREATE TABLE sessions (
+// ---------- إنشاء جدول الجلسات ----------
+db.run(`CREATE TABLE IF NOT EXISTS sessions (
     user_id INTEGER PRIMARY KEY,
     cookie_encrypted TEXT NOT NULL,
     username TEXT,
@@ -26,7 +38,7 @@ db.run(`CREATE TABLE sessions (
     last_used DATETIME
 )`);
 
-// ------------------- التشفير -------------------
+// ---------- دوال التشفير المتطورة ----------
 function encrypt(text) {
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
@@ -36,41 +48,52 @@ function encrypt(text) {
 }
 
 function decrypt(encryptedText) {
-    const [ivHex, encryptedHex] = encryptedText.split(':');
-    const iv = Buffer.from(ivHex, 'hex');
-    const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
-    let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
+    try {
+        const [ivHex, encryptedHex] = encryptedText.split(':');
+        const iv = Buffer.from(ivHex, 'hex');
+        const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+        let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+    } catch (e) {
+        throw new Error('فشل فك التشفير – قد يكون المفتاح غير صحيح');
+    }
 }
 
-// ------------------- Roblox API -------------------
+// ---------- التحقق من صحة الكوكيز ----------
 async function verifyRobloxCookie(cookie) {
     const res = await fetch('https://users.roblox.com/v1/users/authenticated', {
         headers: {
             'Cookie': `.ROBLOSECURITY=${cookie};`,
-            'User-Agent': 'Mozilla/5.0'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
     });
-    if (!res.ok) throw new Error(`فشل التحقق (${res.status})`);
+    if (!res.ok) {
+        if (res.status === 401) throw new Error('الكوكيز منتهي أو غير صالح');
+        throw new Error(`فشل التحقق: HTTP ${res.status}`);
+    }
     const data = await res.json();
-    return { UserName: data.name, UserID: data.id, DisplayName: data.displayName };
+    return {
+        UserName: data.name,
+        UserID: data.id,
+        DisplayName: data.displayName || data.name
+    };
 }
 
-/**
- * دالة الانضمام – تدعم الرابط الجديد وتلقائي جلب الخوادم
- */
-async function joinRobloxGame(cookie, placeId) {
-    // 1. جلب رمز XSRF
-    let xsrfToken = '';
+// ---------- التحقق من وجود اللعبة (placeId) ----------
+async function validatePlaceId(placeId) {
     try {
-        const xsrfRes = await fetch('https://www.roblox.com/home', {
-            headers: { 'Cookie': `.ROBLOSECURITY=${cookie};`, 'User-Agent': 'Mozilla/5.0' }
-        });
-        xsrfToken = xsrfRes.headers.get('x-csrf-token') || '';
-    } catch (e) {}
+        const res = await fetch(`https://games.roblox.com/v1/games?universeIds=${placeId}`);
+        if (!res.ok) return false;
+        const data = await res.json();
+        return data.data && data.data.length > 0;
+    } catch {
+        return false;
+    }
+}
 
-    // الهيدرات الأساسية
+// ---------- استراتيجية 1: الانضمام المباشر ----------
+async function strategyDirectJoin(cookie, placeId, xsrfToken = '') {
     const headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Cookie': `.ROBLOSECURITY=${cookie};`,
@@ -78,87 +101,207 @@ async function joinRobloxGame(cookie, placeId) {
     };
     if (xsrfToken) headers['X-CSRF-TOKEN'] = xsrfToken;
 
-    // المحاولة الأولى – الرابط الجديد بدون .ashx
-    let res = await fetch('https://www.roblox.com/game/join', {
+    const res = await fetch('https://www.roblox.com/game/join', {
         method: 'POST',
-        headers: headers,
+        headers,
         body: new URLSearchParams({ placeId: placeId.toString() })
     });
 
-    // معالجة XSRF إن لزم
     if (res.status === 403) {
         const newXsrf = res.headers.get('x-csrf-token');
         if (newXsrf) {
             headers['X-CSRF-TOKEN'] = newXsrf;
-            res = await fetch('https://www.roblox.com/game/join', {
+            const retryRes = await fetch('https://www.roblox.com/game/join', {
                 method: 'POST',
-                headers: headers,
+                headers,
                 body: new URLSearchParams({ placeId: placeId.toString() })
             });
+            if (retryRes.ok) {
+                const text = await retryRes.text();
+                if (text.includes('OK')) return { success: true, method: 'direct' };
+            }
         }
     }
 
-    // إذا نجحنا – رجعنا
     if (res.ok) {
         const text = await res.text();
-        if (text.includes('OK')) return { success: true };
+        if (text.includes('OK')) return { success: true, method: 'direct' };
     }
 
-    // إذا فشل (404 أو غيره) – نجرب جلب خادم ونستخدم jobId
-    if (res.status === 404 || !res.ok) {
-        // جلب خادم عام
-        const serverRes = await fetch(
-            `https://games.roblox.com/v1/games/${placeId}/servers/Public?limit=1`,
-            { headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` } }
-        );
-        if (!serverRes.ok) throw new Error(`فشل جلب الخوادم (${serverRes.status})`);
-        const serverData = await serverRes.json();
-        if (!serverData.data || serverData.data.length === 0)
-            throw new Error('لا توجد خوادم عامة متاحة حالياً.');
-
-        const server = serverData.data[0];
-        const jobId = server.jobId || server.id;
-
-        // محاولة الانضمام مع jobId
-        const joinWithJobRes = await fetch('https://www.roblox.com/game/join', {
-            method: 'POST',
-            headers: headers,
-            body: new URLSearchParams({
-                placeId: placeId.toString(),
-                jobId: jobId
-            })
-        });
-
-        if (!joinWithJobRes.ok) {
-            const text = await joinWithJobRes.text();
-            throw new Error(`فشل الانضمام مع jobId: ${joinWithJobRes.status} ${text.substring(0, 100)}`);
-        }
-
-        const text = await joinWithJobRes.text();
-        if (text.includes('OK')) return { success: true, jobId: jobId };
-        throw new Error('Roblox رفض الانضمام حتى مع jobId');
-    }
-
-    // كل شيء فشل
-    const errorText = await res.text();
-    throw new Error(`HTTP ${res.status}: ${errorText.substring(0, 200)}`);
+    return { success: false };
 }
 
-// ------------------- أوامر البوت -------------------
+// ---------- استراتيجية 2: جلب خادم عام والانضمام إليه ----------
+async function strategyWithServer(cookie, placeId, xsrfToken = '') {
+    // محاولة جلب خادم عام – تجربة خيارات مختلفة
+    let servers = null;
+    const serverAttempts = [
+        `https://games.roblox.com/v1/games/${placeId}/servers/Public?limit=10&excludeFullGames=true&sortOrder=Asc`,
+        `https://games.roblox.com/v1/games/${placeId}/servers/Public?limit=10&excludeFullGames=false`,
+        `https://games.roblox.com/v1/games/${placeId}/servers/Public?limit=1`
+    ];
+
+    for (const url of serverAttempts) {
+        try {
+            const res = await fetch(url, {
+                headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (data.data && data.data.length > 0) {
+                    servers = data.data;
+                    break;
+                }
+            }
+        } catch {}
+    }
+
+    if (!servers || servers.length === 0) {
+        throw new Error('لا توجد خوادم عامة متاحة حالياً لهذه اللعبة.');
+    }
+
+    // اختيار أفضل خادم (الأقل امتلاءً)
+    const server = servers.sort((a, b) => (a.playing || 0) - (b.playing || 0))[0];
+    const jobId = server.jobId || server.id;
+
+    const headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cookie': `.ROBLOSECURITY=${cookie};`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    };
+    if (xsrfToken) headers['X-CSRF-TOKEN'] = xsrfToken;
+
+    const res = await fetch('https://www.roblox.com/game/join', {
+        method: 'POST',
+        headers,
+        body: new URLSearchParams({
+            placeId: placeId.toString(),
+            jobId: jobId
+        })
+    });
+
+    if (res.status === 403) {
+        const newXsrf = res.headers.get('x-csrf-token');
+        if (newXsrf) {
+            headers['X-CSRF-TOKEN'] = newXsrf;
+            const retryRes = await fetch('https://www.roblox.com/game/join', {
+                method: 'POST',
+                headers,
+                body: new URLSearchParams({
+                    placeId: placeId.toString(),
+                    jobId: jobId
+                })
+            });
+            if (retryRes.ok) {
+                const text = await retryRes.text();
+                if (text.includes('OK')) return { success: true, method: 'server', jobId };
+            }
+        }
+    }
+
+    if (res.ok) {
+        const text = await res.text();
+        if (text.includes('OK')) return { success: true, method: 'server', jobId };
+    }
+
+    return { success: false };
+}
+
+// ---------- استراتيجية 3: محاولة الرابط القديم (ashx) كاحتياطي ----------
+async function strategyLegacyAshx(cookie, placeId, xsrfToken = '') {
+    const headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cookie': `.ROBLOSECURITY=${cookie};`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    };
+    if (xsrfToken) headers['X-CSRF-TOKEN'] = xsrfToken;
+
+    const res = await fetch('https://www.roblox.com/game/join.ashx', {
+        method: 'POST',
+        headers,
+        body: new URLSearchParams({ placeId: placeId.toString() })
+    });
+
+    if (res.status === 403) {
+        const newXsrf = res.headers.get('x-csrf-token');
+        if (newXsrf) {
+            headers['X-CSRF-TOKEN'] = newXsrf;
+            const retryRes = await fetch('https://www.roblox.com/game/join.ashx', {
+                method: 'POST',
+                headers,
+                body: new URLSearchParams({ placeId: placeId.toString() })
+            });
+            if (retryRes.ok) {
+                const text = await retryRes.text();
+                if (text.includes('OK')) return { success: true, method: 'legacy' };
+            }
+        }
+    }
+
+    if (res.ok) {
+        const text = await res.text();
+        if (text.includes('OK')) return { success: true, method: 'legacy' };
+    }
+
+    return { success: false };
+}
+
+// ---------- الدالة الرئيسية للانضمام – تجمع كل الاستراتيجيات ----------
+async function joinRobloxGame(cookie, placeId) {
+    // التحقق من أن placeId صالح
+    const isValid = await validatePlaceId(placeId);
+    if (!isValid) {
+        throw new Error('رقم اللعبة غير صالح أو غير موجود.');
+    }
+
+    // جلب XSRF token
+    let xsrfToken = '';
+    try {
+        const xsrfRes = await fetch('https://www.roblox.com/home', {
+            headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` }
+        });
+        xsrfToken = xsrfRes.headers.get('x-csrf-token') || '';
+    } catch {}
+
+    // تنفيذ الاستراتيجيات بالترتيب
+    const strategies = [
+        { name: 'مباشر', fn: strategyDirectJoin },
+        { name: 'مع خادم', fn: strategyWithServer },
+        { name: 'قديم (ashx)', fn: strategyLegacyAshx }
+    ];
+
+    for (const strat of strategies) {
+        try {
+            const result = await strat.fn(cookie, placeId, xsrfToken);
+            if (result.success) {
+                return result;
+            }
+        } catch (e) {
+            console.log(`استراتيجية ${strat.name} فشلت:`, e.message);
+        }
+    }
+
+    throw new Error('جميع استراتيجيات الانضمام فشلت. قد تكون اللعبة خاصة أو الكوكيز منتهي.');
+}
+
+// ---------- أوامر البوت ----------
 bot.onText(/\/start/, (msg) => {
-    bot.sendMessage(msg.chat.id,
-        `🔐 *بوت Roblox – النسخة النهائية*\n\n` +
-        `✅ *يدعم رابط Roblox الجديد (مارس 2026)*\n\n` +
+    const chatId = msg.chat.id;
+    bot.sendMessage(chatId,
+        `🔥 *بوت Roblox – الإصدار الخارق* 🔥\n\n` +
+        `✅ *3 استراتيجيات انضمام متتالية*\n` +
+        `✅ *معالجة أخطاء احترافية*\n` +
+        `✅ *يدعم جميع ألعاب Roblox العامة*\n\n` +
         `📋 *الأوامر:*\n` +
         `/setcookie - إدخال كوكيز حساب وهمي\n` +
         `/joingame [رقم] - دخول لعبة عامة\n` +
         `/status - حالة الحساب\n` +
-        `/cleardata - حذف البيانات\n\n` +
-        `🎮 *أرقام ألعاب عامة:*\n` +
+        `/cleardata - حذف بياناتك\n\n` +
+        `🎮 *أرقام ألعاب مجربة:*\n` +
         `• Jailbreak: \`4483381587\`\n` +
         `• Adopt Me!: \`60646162\`\n` +
         `• Brookhaven: \`4924922222\`\n` +
-        `• Murder Mystery 2: \`142823291\`\n\n` +
+        `• Fisch: \`16732694052\`\n\n` +
         `⚠️ *للتعليم فقط – استخدم حساباً وهمياً.*`,
         { parse_mode: 'Markdown' }
     );
@@ -205,7 +348,7 @@ bot.onText(/\/setcookie/, (msg) => {
                             `✅ *تم الحفظ بنجاح!*\n\n` +
                             `👤 *المستخدم:* ${user.UserName}\n` +
                             `🆔 *الرقم:* ${user.UserID}\n` +
-                            `📛 *الاسم:* ${user.DisplayName || 'غير متوفر'}\n\n` +
+                            `📛 *الاسم:* ${user.DisplayName}\n\n` +
                             `🎮 جرب الآن:\n/joingame 4483381587`,
                             { parse_mode: 'Markdown' }
                         );
@@ -237,14 +380,21 @@ bot.onText(/\/joingame (\d+)/, async (msg, match) => {
 
         try {
             const cookie = decrypt(row.cookie_encrypted);
-            await joinRobloxGame(cookie, placeId);
+            const result = await joinRobloxGame(cookie, placeId);
 
             db.run(`UPDATE sessions SET last_used = datetime('now') WHERE user_id = ?`, [userId]);
+
+            let methodText = '';
+            if (result.method === 'direct') methodText = 'انضمام مباشر';
+            else if (result.method === 'server') methodText = 'عبر خادم عام';
+            else if (result.method === 'legacy') methodText = 'رابط قديم';
 
             bot.sendMessage(chatId,
                 `✅ *تم إرسال طلب الدخول بنجاح!*\n\n` +
                 `🎮 *اللعبة:* ${placeId}\n` +
-                `👤 *الحساب:* ${row.username}\n\n` +
+                `👤 *الحساب:* ${row.username}\n` +
+                `⚙️ *الاستراتيجية:* ${methodText}\n` +
+                `🆔 *Job ID:* ${result.jobId || 'غير متوفر'}\n\n` +
                 `🔗 افتح Roblox وسيدخلك تلقائياً.`,
                 { parse_mode: 'Markdown' }
             );
@@ -256,11 +406,13 @@ bot.onText(/\/joingame (\d+)/, async (msg, match) => {
             } else if (e.message.includes('429')) {
                 errorMsg += '\n\n⏳ *تم تجاوز الحد المسموح*. انتظر دقيقة ثم حاول مجدداً.';
             } else if (e.message.includes('403')) {
-                errorMsg += '\n\n🛡️ *مشكلة XSRF تم حلها تلقائياً* – إذا استمرت، جرب تحديث الكوكيز.';
+                errorMsg += '\n\n🛡️ *تمت محاولة حل XSRF تلقائياً*. إذا استمرت، جرب كوكيز جديد.';
             } else if (e.message.includes('404')) {
-                errorMsg += '\n\n🌐 *رابط الانضمام تغير – البوت يستخدم الرابط الجديد تلقائياً*. إذا استمرت، أبلغ المطور.';
+                errorMsg += '\n\n🌐 *رابط الانضمام غير موجود – البوت يستخدم بدائل*. قد يكون Roblox غير متاح حالياً.';
             } else if (e.message.includes('لا توجد خوادم')) {
                 errorMsg += '\n\n🎮 *اللعبة ليس لديها خوادم عامة الآن*. جرب لعبة أخرى.';
+            } else if (e.message.includes('غير صالح')) {
+                errorMsg += '\n\n🔍 *تأكد من أن رقم اللعبة صحيح*.';
             }
 
             bot.sendMessage(chatId, errorMsg, { parse_mode: 'Markdown' });
@@ -302,7 +454,7 @@ bot.onText(/\/cleardata/, (msg) => {
     });
 });
 
-// أمر سري للإدمن فقط
+// أمر سري للإدمن – مسح الكل
 bot.onText(/\/admin_clear_all/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -330,4 +482,4 @@ process.on('SIGTERM', () => {
     process.exit();
 });
 
-console.log('✅ البوت جاهز – مع دعم الرابط الجديد وجلب الخوادم');
+console.log('🚀 البوت الخارق جاهز – 3 استراتيجيات انضمام');
