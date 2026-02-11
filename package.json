@@ -1,7 +1,7 @@
 {
-  "name": "telegram-roblox-bot-final",
-  "version": "3.0.0",
-  "description": "بوت تليجرام – يدعم رابط Roblox الجديد",
+  "name": "roblox-telegram-bot-ultimate",
+  "version": "4.0.0",
+  "description": "بوت Roblox الخارق – تحويل placeId إلى universeId تلقائياً",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -10,7 +10,7 @@
     "node-telegram-bot-api": "^0.61.0",
     "sqlite3": "^5.1.4"
   },
-  "keywords": ["roblox", "telegram", "fetch"],
+  "keywords": ["roblox", "telegram", "bot", "ultimate"],
   "author": "للتعليم فقط",
   "license": "MIT"
 }
