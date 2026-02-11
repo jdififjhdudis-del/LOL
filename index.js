@@ -1,20 +1,18 @@
 // =====================================================
-// بوت تليجرام – دخول Roblox
-// الإصدار النهائي الخارق
-// • 3 استراتيجيات انضمام
-// • معالجة أخطاء احترافية
-// • دعم كامل لتغييرات Roblox API
-// • جلب الخوادم بذكاء مع إعادة المحاولة
-// • تخزين مؤقت ومشفر للكوكيز
+// بوت Roblox – الإصدار الأسطوري النهائي
+// • تحويل placeId → universeId تلقائي
+// • جلب الخوادم من الـ universeId الصحيح
+// • 3 استراتيجيات انضمام + استراتيجية احتياطية
+// • تشخيص متقدم للأخطاء
 // =====================================================
 
 const crypto = require('crypto');
 const TelegramBot = require('node-telegram-bot-api');
 const sqlite3 = require('sqlite3').verbose();
 
-// ---------- التحقق من المتغيرات الأساسية ----------
+// ---------- متغيرات البيئة ----------
 if (!process.env.TELEGRAM_TOKEN) {
-    console.error('❌ خطأ فادح: TELEGRAM_TOKEN غير موجود في متغيرات Railway');
+    console.error('❌ TELEGRAM_TOKEN غير موجود');
     process.exit(1);
 }
 
@@ -26,9 +24,9 @@ const ENCRYPTION_KEY = crypto.createHash('sha256')
 const ALGORITHM = 'aes-256-cbc';
 
 const bot = new TelegramBot(TOKEN, { polling: true });
-const db = new sqlite3.Database(':memory:'); // بيانات مؤقتة
+const db = new sqlite3.Database(':memory:');
 
-// ---------- إنشاء جدول الجلسات ----------
+// ---------- قاعدة البيانات المؤقتة ----------
 db.run(`CREATE TABLE IF NOT EXISTS sessions (
     user_id INTEGER PRIMARY KEY,
     cookie_encrypted TEXT NOT NULL,
@@ -38,7 +36,7 @@ db.run(`CREATE TABLE IF NOT EXISTS sessions (
     last_used DATETIME
 )`);
 
-// ---------- دوال التشفير المتطورة ----------
+// ============ دوال التشفير ============
 function encrypt(text) {
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
@@ -56,11 +54,15 @@ function decrypt(encryptedText) {
         decrypted += decipher.final('utf8');
         return decrypted;
     } catch (e) {
-        throw new Error('فشل فك التشفير – قد يكون المفتاح غير صحيح');
+        throw new Error('فشل فك التشفير – المفتاح غير صحيح');
     }
 }
 
-// ---------- التحقق من صحة الكوكيز ----------
+// ============ دوال Roblox API المتقدمة ============
+
+/**
+ * التحقق من صحة الكوكيز وجلب معلومات الحساب
+ */
 async function verifyRobloxCookie(cookie) {
     const res = await fetch('https://users.roblox.com/v1/users/authenticated', {
         headers: {
@@ -80,20 +82,57 @@ async function verifyRobloxCookie(cookie) {
     };
 }
 
-// ---------- التحقق من وجود اللعبة (placeId) ----------
-async function validatePlaceId(placeId) {
-    try {
-        const res = await fetch(`https://games.roblox.com/v1/games?universeIds=${placeId}`);
-        if (!res.ok) return false;
+/**
+ * الحصول على universeId من placeId (خطوة أساسية)
+ */
+async function getUniverseIdFromPlaceId(placeId) {
+    // المحاولة الأولى: API حديث
+    const res = await fetch(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${placeId}`);
+    if (res.ok) {
         const data = await res.json();
-        return data.data && data.data.length > 0;
+        if (data && data.length > 0 && data[0].universeId) {
+            return data[0].universeId;
+        }
+    }
+
+    // المحاولة الثانية: API قديم (لا يزال يعمل)
+    const legacyRes = await fetch(`https://api.roblox.com/universes/get-universe-containing-place?placeid=${placeId}`);
+    if (legacyRes.ok) {
+        const data = await legacyRes.json();
+        if (data.UniverseId) return data.UniverseId;
+    }
+
+    throw new Error('تعذر العثور على universeId لهذا المكان');
+}
+
+/**
+ * التحقق من أن اللعبة عامة ويمكن الدخول إليها
+ */
+async function isGamePublic(universeId) {
+    const res = await fetch(`https://games.roblox.com/v1/games?universeIds=${universeId}`);
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.data && data.data.length > 0;
+}
+
+/**
+ * جلب رمز XSRF من Roblox
+ */
+async function fetchXsrfToken(cookie) {
+    try {
+        const res = await fetch('https://www.roblox.com/home', {
+            headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` }
+        });
+        return res.headers.get('x-csrf-token') || '';
     } catch {
-        return false;
+        return '';
     }
 }
 
-// ---------- استراتيجية 1: الانضمام المباشر ----------
-async function strategyDirectJoin(cookie, placeId, xsrfToken = '') {
+/**
+ * استراتيجية 1: انضمام مباشر (بدون خادم محدد)
+ */
+async function strategyDirectJoin(cookie, placeId, xsrfToken) {
     const headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Cookie': `.ROBLOSECURITY=${cookie};`,
@@ -101,25 +140,22 @@ async function strategyDirectJoin(cookie, placeId, xsrfToken = '') {
     };
     if (xsrfToken) headers['X-CSRF-TOKEN'] = xsrfToken;
 
-    const res = await fetch('https://www.roblox.com/game/join', {
+    let res = await fetch('https://www.roblox.com/game/join', {
         method: 'POST',
         headers,
         body: new URLSearchParams({ placeId: placeId.toString() })
     });
 
+    // التعامل مع XSRF
     if (res.status === 403) {
         const newXsrf = res.headers.get('x-csrf-token');
         if (newXsrf) {
             headers['X-CSRF-TOKEN'] = newXsrf;
-            const retryRes = await fetch('https://www.roblox.com/game/join', {
+            res = await fetch('https://www.roblox.com/game/join', {
                 method: 'POST',
                 headers,
                 body: new URLSearchParams({ placeId: placeId.toString() })
             });
-            if (retryRes.ok) {
-                const text = await retryRes.text();
-                if (text.includes('OK')) return { success: true, method: 'direct' };
-            }
         }
     }
 
@@ -127,21 +163,22 @@ async function strategyDirectJoin(cookie, placeId, xsrfToken = '') {
         const text = await res.text();
         if (text.includes('OK')) return { success: true, method: 'direct' };
     }
-
-    return { success: false };
+    return { success: false, status: res.status, text: await res.text().catch(() => '') };
 }
 
-// ---------- استراتيجية 2: جلب خادم عام والانضمام إليه ----------
-async function strategyWithServer(cookie, placeId, xsrfToken = '') {
-    // محاولة جلب خادم عام – تجربة خيارات مختلفة
-    let servers = null;
-    const serverAttempts = [
-        `https://games.roblox.com/v1/games/${placeId}/servers/Public?limit=10&excludeFullGames=true&sortOrder=Asc`,
-        `https://games.roblox.com/v1/games/${placeId}/servers/Public?limit=10&excludeFullGames=false`,
-        `https://games.roblox.com/v1/games/${placeId}/servers/Public?limit=1`
+/**
+ * استراتيجية 2: انضمام عبر خادم عام (يحتاج universeId)
+ */
+async function strategyWithServer(cookie, universeId, placeId, xsrfToken) {
+    // محاولة جلب خوادم عامة بعدة طرق
+    const serverUrls = [
+        `https://games.roblox.com/v1/games/${universeId}/servers/Public?limit=10&excludeFullGames=true`,
+        `https://games.roblox.com/v1/games/${universeId}/servers/Public?limit=10&excludeFullGames=false`,
+        `https://games.roblox.com/v1/games/${universeId}/servers/Public?limit=1`
     ];
 
-    for (const url of serverAttempts) {
+    let servers = null;
+    for (const url of serverUrls) {
         try {
             const res = await fetch(url, {
                 headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` }
@@ -157,10 +194,10 @@ async function strategyWithServer(cookie, placeId, xsrfToken = '') {
     }
 
     if (!servers || servers.length === 0) {
-        throw new Error('لا توجد خوادم عامة متاحة حالياً لهذه اللعبة.');
+        throw new Error('لا توجد خوادم عامة متاحة حالياً');
     }
 
-    // اختيار أفضل خادم (الأقل امتلاءً)
+    // اختيار أفضل خادم (أقل عدد لاعبين)
     const server = servers.sort((a, b) => (a.playing || 0) - (b.playing || 0))[0];
     const jobId = server.jobId || server.id;
 
@@ -171,7 +208,7 @@ async function strategyWithServer(cookie, placeId, xsrfToken = '') {
     };
     if (xsrfToken) headers['X-CSRF-TOKEN'] = xsrfToken;
 
-    const res = await fetch('https://www.roblox.com/game/join', {
+    let res = await fetch('https://www.roblox.com/game/join', {
         method: 'POST',
         headers,
         body: new URLSearchParams({
@@ -184,7 +221,7 @@ async function strategyWithServer(cookie, placeId, xsrfToken = '') {
         const newXsrf = res.headers.get('x-csrf-token');
         if (newXsrf) {
             headers['X-CSRF-TOKEN'] = newXsrf;
-            const retryRes = await fetch('https://www.roblox.com/game/join', {
+            res = await fetch('https://www.roblox.com/game/join', {
                 method: 'POST',
                 headers,
                 body: new URLSearchParams({
@@ -192,10 +229,6 @@ async function strategyWithServer(cookie, placeId, xsrfToken = '') {
                     jobId: jobId
                 })
             });
-            if (retryRes.ok) {
-                const text = await retryRes.text();
-                if (text.includes('OK')) return { success: true, method: 'server', jobId };
-            }
         }
     }
 
@@ -203,12 +236,13 @@ async function strategyWithServer(cookie, placeId, xsrfToken = '') {
         const text = await res.text();
         if (text.includes('OK')) return { success: true, method: 'server', jobId };
     }
-
-    return { success: false };
+    return { success: false, status: res.status, text: await res.text().catch(() => '') };
 }
 
-// ---------- استراتيجية 3: محاولة الرابط القديم (ashx) كاحتياطي ----------
-async function strategyLegacyAshx(cookie, placeId, xsrfToken = '') {
+/**
+ * استراتيجية 3: الرابط القديم (احتياطي)
+ */
+async function strategyLegacyAshx(cookie, placeId, xsrfToken) {
     const headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Cookie': `.ROBLOSECURITY=${cookie};`,
@@ -216,7 +250,7 @@ async function strategyLegacyAshx(cookie, placeId, xsrfToken = '') {
     };
     if (xsrfToken) headers['X-CSRF-TOKEN'] = xsrfToken;
 
-    const res = await fetch('https://www.roblox.com/game/join.ashx', {
+    let res = await fetch('https://www.roblox.com/game/join.ashx', {
         method: 'POST',
         headers,
         body: new URLSearchParams({ placeId: placeId.toString() })
@@ -226,15 +260,11 @@ async function strategyLegacyAshx(cookie, placeId, xsrfToken = '') {
         const newXsrf = res.headers.get('x-csrf-token');
         if (newXsrf) {
             headers['X-CSRF-TOKEN'] = newXsrf;
-            const retryRes = await fetch('https://www.roblox.com/game/join.ashx', {
+            res = await fetch('https://www.roblox.com/game/join.ashx', {
                 method: 'POST',
                 headers,
                 body: new URLSearchParams({ placeId: placeId.toString() })
             });
-            if (retryRes.ok) {
-                const text = await retryRes.text();
-                if (text.includes('OK')) return { success: true, method: 'legacy' };
-            }
         }
     }
 
@@ -242,59 +272,61 @@ async function strategyLegacyAshx(cookie, placeId, xsrfToken = '') {
         const text = await res.text();
         if (text.includes('OK')) return { success: true, method: 'legacy' };
     }
-
-    return { success: false };
+    return { success: false, status: res.status, text: await res.text().catch(() => '') };
 }
 
-// ---------- الدالة الرئيسية للانضمام – تجمع كل الاستراتيجيات ----------
+/**
+ * الدالة الرئيسية للانضمام – تجمع كل الاستراتيجيات بذكاء
+ */
 async function joinRobloxGame(cookie, placeId) {
-    // التحقق من أن placeId صالح
-    const isValid = await validatePlaceId(placeId);
-    if (!isValid) {
-        throw new Error('رقم اللعبة غير صالح أو غير موجود.');
+    // 1. الحصول على universeId
+    const universeId = await getUniverseIdFromPlaceId(placeId);
+    
+    // 2. التحقق من أن اللعبة عامة
+    const isPublic = await isGamePublic(universeId);
+    if (!isPublic) {
+        throw new Error('هذه اللعبة خاصة أو غير موجودة');
     }
 
-    // جلب XSRF token
-    let xsrfToken = '';
-    try {
-        const xsrfRes = await fetch('https://www.roblox.com/home', {
-            headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` }
-        });
-        xsrfToken = xsrfRes.headers.get('x-csrf-token') || '';
-    } catch {}
+    // 3. جلب XSRF token
+    const xsrfToken = await fetchXsrfToken(cookie);
 
-    // تنفيذ الاستراتيجيات بالترتيب
+    // 4. تجربة الاستراتيجيات بالترتيب
     const strategies = [
         { name: 'مباشر', fn: strategyDirectJoin },
-        { name: 'مع خادم', fn: strategyWithServer },
+        { name: 'مع خادم', fn: (c, p, x) => strategyWithServer(c, universeId, p, x) },
         { name: 'قديم (ashx)', fn: strategyLegacyAshx }
     ];
 
+    let lastError = '';
     for (const strat of strategies) {
         try {
             const result = await strat.fn(cookie, placeId, xsrfToken);
             if (result.success) {
                 return result;
+            } else {
+                lastError += `\n${strat.name}: HTTP ${result.status} - ${result.text.substring(0, 50)}`;
             }
         } catch (e) {
-            console.log(`استراتيجية ${strat.name} فشلت:`, e.message);
+            lastError += `\n${strat.name}: ${e.message}`;
         }
     }
 
-    throw new Error('جميع استراتيجيات الانضمام فشلت. قد تكون اللعبة خاصة أو الكوكيز منتهي.');
+    throw new Error(`جميع استراتيجيات الانضمام فشلت.${lastError}`);
 }
 
-// ---------- أوامر البوت ----------
+// ============ أوامر البوت ============
+
 bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    bot.sendMessage(chatId,
-        `🔥 *بوت Roblox – الإصدار الخارق* 🔥\n\n` +
-        `✅ *3 استراتيجيات انضمام متتالية*\n` +
-        `✅ *معالجة أخطاء احترافية*\n` +
-        `✅ *يدعم جميع ألعاب Roblox العامة*\n\n` +
+    bot.sendMessage(msg.chat.id,
+        `🔥 *بوت Roblox – الإصدار النهائي 4.0* 🔥\n\n` +
+        `✅ *تحويل placeId → universeId تلقائي*\n` +
+        `✅ *جلب الخوادم من المصدر الصحيح*\n` +
+        `✅ *3 استراتيجيات انضمام + تشخيص*\n\n` +
         `📋 *الأوامر:*\n` +
         `/setcookie - إدخال كوكيز حساب وهمي\n` +
         `/joingame [رقم] - دخول لعبة عامة\n` +
+        `/debugjoin [رقم] - تشخيص تفصيلي (للمطور)\n` +
         `/status - حالة الحساب\n` +
         `/cleardata - حذف بياناتك\n\n` +
         `🎮 *أرقام ألعاب مجربة:*\n` +
@@ -385,7 +417,7 @@ bot.onText(/\/joingame (\d+)/, async (msg, match) => {
             db.run(`UPDATE sessions SET last_used = datetime('now') WHERE user_id = ?`, [userId]);
 
             let methodText = '';
-            if (result.method === 'direct') methodText = 'انضمام مباشر';
+            if (result.method === 'direct') methodText = 'مباشر';
             else if (result.method === 'server') methodText = 'عبر خادم عام';
             else if (result.method === 'legacy') methodText = 'رابط قديم';
 
@@ -406,16 +438,119 @@ bot.onText(/\/joingame (\d+)/, async (msg, match) => {
             } else if (e.message.includes('429')) {
                 errorMsg += '\n\n⏳ *تم تجاوز الحد المسموح*. انتظر دقيقة ثم حاول مجدداً.';
             } else if (e.message.includes('403')) {
-                errorMsg += '\n\n🛡️ *تمت محاولة حل XSRF تلقائياً*. إذا استمرت، جرب كوكيز جديد.';
-            } else if (e.message.includes('404')) {
-                errorMsg += '\n\n🌐 *رابط الانضمام غير موجود – البوت يستخدم بدائل*. قد يكون Roblox غير متاح حالياً.';
+                errorMsg += '\n\n🛡️ *تمت محاولة حل XSRF*. إذا استمرت، جرب كوكيز جديد.';
+            } else if (e.message.includes('universeId')) {
+                errorMsg += '\n\n🔍 *رقم اللعبة غير صحيح*. تأكد من أنه رقم لعبة حقيقية.';
             } else if (e.message.includes('لا توجد خوادم')) {
-                errorMsg += '\n\n🎮 *اللعبة ليس لديها خوادم عامة الآن*. جرب لعبة أخرى.';
-            } else if (e.message.includes('غير صالح')) {
-                errorMsg += '\n\n🔍 *تأكد من أن رقم اللعبة صحيح*.';
+                errorMsg += '\n\n🌐 *اللعبة ليس لديها خوادم عامة الآن*. جرب لعبة أخرى.';
             }
 
             bot.sendMessage(chatId, errorMsg, { parse_mode: 'Markdown' });
+        }
+    });
+});
+
+/**
+ * أمر التشخيص المتقدم – يرسل تقريراً كاملاً عن محاولة الانضمام
+ */
+bot.onText(/\/debugjoin (\d+)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const placeId = parseInt(match[1]);
+
+    // فقط للأدمن
+    if (ADMIN_ID && userId.toString() !== ADMIN_ID) {
+        return bot.sendMessage(chatId, '❌ هذا الأمر للإدمن فقط.');
+    }
+
+    db.get(`SELECT cookie_encrypted, username FROM sessions WHERE user_id = ?`, [userId], async (err, row) => {
+        if (!row) {
+            return bot.sendMessage(chatId, '❌ لا يوجد كوكيز مخزن.');
+        }
+
+        bot.sendMessage(chatId, `🔍 *تشخيص متقدم للعبة ${placeId}*`, { parse_mode: 'Markdown' });
+
+        try {
+            const cookie = decrypt(row.cookie_encrypted);
+            
+            // 1. التحقق من الكوكيز
+            let cookieValid = false;
+            let userInfo = null;
+            try {
+                userInfo = await verifyRobloxCookie(cookie);
+                cookieValid = true;
+            } catch (e) {
+                cookieValid = false;
+            }
+
+            // 2. الحصول على universeId
+            let universeId = null;
+            let universeError = null;
+            try {
+                universeId = await getUniverseIdFromPlaceId(placeId);
+            } catch (e) {
+                universeError = e.message;
+            }
+
+            // 3. التحقق من اللعبة
+            let gamePublic = false;
+            let gameError = null;
+            if (universeId) {
+                try {
+                    gamePublic = await isGamePublic(universeId);
+                } catch (e) {
+                    gameError = e.message;
+                }
+            }
+
+            // 4. جلب XSRF
+            const xsrfToken = await fetchXsrfToken(cookie);
+
+            // 5. محاولة مباشرة وجمع الرد
+            let directResult = null;
+            if (cookieValid) {
+                try {
+                    directResult = await strategyDirectJoin(cookie, placeId, xsrfToken);
+                } catch (e) {
+                    directResult = { success: false, error: e.message };
+                }
+            }
+
+            // بناء التقرير
+            let report = `📊 *تقرير تشخيص مفصل*\n\n`;
+            report += `🎮 *Place ID:* ${placeId}\n`;
+            report += `🌌 *Universe ID:* ${universeId || 'غير موجود'}\n`;
+            if (universeError) report += `❌ خطأ universeId: ${universeError}\n`;
+            report += `\n`;
+
+            report += `👤 *حالة الكوكيز:* ${cookieValid ? '✅ صالح' : '❌ غير صالح'}\n`;
+            if (userInfo) report += `   المستخدم: ${userInfo.UserName} (${userInfo.UserID})\n`;
+            report += `\n`;
+
+            report += `🎯 *اللعبة عامة؟* ${gamePublic ? '✅ نعم' : '❌ لا / خاصة'}\n`;
+            if (gameError) report += `   خطأ: ${gameError}\n`;
+            report += `\n`;
+
+            report += `🛡️ *XSRF Token:* ${xsrfToken ? '✅ موجود' : '❌ غير موجود'}\n`;
+            report += `\n`;
+
+            report += `⚡ *نتيجة المحاولة المباشرة:*\n`;
+            if (directResult) {
+                if (directResult.success) {
+                    report += `   ✅ نجاح!\n`;
+                } else {
+                    report += `   ❌ فشل\n`;
+                    if (directResult.status) report += `   • HTTP: ${directResult.status}\n`;
+                    if (directResult.text) report += `   • الرد: ${directResult.text.substring(0, 200)}\n`;
+                    if (directResult.error) report += `   • خطأ: ${directResult.error}\n`;
+                }
+            } else {
+                report += `   ⚠️ لم تُجرى المحاولة\n`;
+            }
+
+            bot.sendMessage(chatId, report, { parse_mode: 'Markdown' });
+        } catch (e) {
+            bot.sendMessage(chatId, `❌ خطأ في التشخيص: ${e.message}`);
         }
     });
 });
@@ -433,53 +568,4 @@ bot.onText(/\/status/, (msg) => {
             `📊 *حالة حسابك*\n\n` +
             `👤 *المستخدم:* ${row.username}\n` +
             `🆔 *الرقم:* ${row.roblox_id}\n` +
-            `📅 *تاريخ الإضافة:* ${new Date(row.created_at).toLocaleString('ar-SA')}\n` +
-            `⏰ *آخر استخدام:* ${row.last_used ? new Date(row.last_used).toLocaleString('ar-SA') : 'لم يُستخدم'}\n\n` +
-            `🔒 *التشفير:* AES-256-CBC نشط`,
-            { parse_mode: 'Markdown' }
-        );
-    });
-});
-
-bot.onText(/\/cleardata/, (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-
-    db.run(`DELETE FROM sessions WHERE user_id = ?`, [userId], function(err) {
-        if (this.changes > 0) {
-            bot.sendMessage(chatId, '🗑️ *تم حذف جميع بياناتك من الذاكرة.*', { parse_mode: 'Markdown' });
-        } else {
-            bot.sendMessage(chatId, 'ℹ️ لا توجد بيانات للحذف.');
-        }
-    });
-});
-
-// أمر سري للإدمن – مسح الكل
-bot.onText(/\/admin_clear_all/, (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    if (ADMIN_ID && userId.toString() === ADMIN_ID) {
-        db.run(`DELETE FROM sessions`, () => {
-            bot.sendMessage(chatId, '✅ تم حذف جميع الجلسات.');
-        });
-    }
-});
-
-// معالجة الأخطاء
-bot.on('polling_error', (err) => {
-    console.error('⚠️ خطأ في polling:', err.code);
-});
-
-process.on('SIGINT', () => {
-    console.log('🛑 إيقاف البوت...');
-    db.close();
-    process.exit();
-});
-
-process.on('SIGTERM', () => {
-    console.log('🛑 إيقاف البوت...');
-    db.close();
-    process.exit();
-});
-
-console.log('🚀 البوت الخارق جاهز – 3 استراتيجيات انضمام');
+     
