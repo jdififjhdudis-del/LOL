@@ -1,7 +1,7 @@
 {
-  "name": "roblox-telegram-bot-ultimate",
-  "version": "4.0.1",
-  "description": "بوت Roblox الخارق – تم إصلاح الأخطاء النحوية",
+  "name": "roblox-telegram-bot-final",
+  "version": "5.0.0",
+  "description": "بوت Roblox – خالٍ من الأخطاء",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -10,7 +10,6 @@
     "node-telegram-bot-api": "^0.61.0",
     "sqlite3": "^5.1.4"
   },
-  "keywords": ["roblox", "telegram", "bot", "ultimate"],
   "author": "للتعليم فقط",
   "license": "MIT"
 }
