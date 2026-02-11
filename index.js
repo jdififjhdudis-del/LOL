@@ -1,8 +1,8 @@
 // ============================================
-// بوت Roblox – الإصدار النهائي المطلق
-// • تحويل placeId → universeId تلقائي
-// • 3 استراتيجيات انضمام ذكية
-// • تشخيص متقدم
+// بوت Roblox – الإصدار المستقر النهائي
+// • معالجة fetch failed عبر إعادة المحاولة
+// • User-Agent قوي يحاكي Chrome
+// • 3 استراتيجيات انضمام مع fallback
 // • جميع الأقواس مغلقة – جاهز للتشغيل
 // ============================================
 
@@ -57,10 +57,33 @@ function decrypt(encryptedText) {
     }
 }
 
-// ================= دوال Roblox API =================
+// ================= دوال Roblox API مع إعادة محاولة =================
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const MAX_RETRIES = 3;
+
+async function fetchWithRetry(url, options = {}, retries = MAX_RETRIES) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const res = await fetch(url, {
+                ...options,
+                headers: {
+                    'User-Agent': USER_AGENT,
+                    'Accept': 'application/json, text/plain, */*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    ...options.headers
+                }
+            });
+            return res;
+        } catch (err) {
+            if (i === retries - 1) throw err;
+            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+        }
+    }
+}
+
 async function verifyCookie(cookie) {
-    const res = await fetch('https://users.roblox.com/v1/users/authenticated', {
-        headers: { 'Cookie': `.ROBLOSECURITY=${cookie};`, 'User-Agent': 'Mozilla/5.0' }
+    const res = await fetchWithRetry('https://users.roblox.com/v1/users/authenticated', {
+        headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` }
     });
     if (!res.ok) throw new Error(res.status === 401 ? 'الكوكيز منتهي' : `HTTP ${res.status}`);
     const data = await res.json();
@@ -68,12 +91,12 @@ async function verifyCookie(cookie) {
 }
 
 async function getUniverseId(placeId) {
-    const res = await fetch(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${placeId}`);
+    const res = await fetchWithRetry(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${placeId}`);
     if (res.ok) {
         const data = await res.json();
         if (data?.[0]?.universeId) return data[0].universeId;
     }
-    const legacy = await fetch(`https://api.roblox.com/universes/get-universe-containing-place?placeid=${placeId}`);
+    const legacy = await fetchWithRetry(`https://api.roblox.com/universes/get-universe-containing-place?placeid=${placeId}`);
     if (legacy.ok) {
         const data = await legacy.json();
         if (data.UniverseId) return data.UniverseId;
@@ -82,7 +105,7 @@ async function getUniverseId(placeId) {
 }
 
 async function isGamePublic(universeId) {
-    const res = await fetch(`https://games.roblox.com/v1/games?universeIds=${universeId}`);
+    const res = await fetchWithRetry(`https://games.roblox.com/v1/games?universeIds=${universeId}`);
     if (!res.ok) return false;
     const data = await res.json();
     return !!(data.data?.length);
@@ -90,7 +113,7 @@ async function isGamePublic(universeId) {
 
 async function getXsrf(cookie) {
     try {
-        const res = await fetch('https://www.roblox.com/home', {
+        const res = await fetchWithRetry('https://www.roblox.com/home', {
             headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` }
         });
         return res.headers.get('x-csrf-token') || '';
@@ -99,16 +122,15 @@ async function getXsrf(cookie) {
     }
 }
 
-// ================= استراتيجيات الانضمام =================
+// ================= استراتيجيات الانضمام (محسنة) =================
 async function directJoin(cookie, placeId, xsrf) {
     const headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Cookie': `.ROBLOSECURITY=${cookie};`,
-        'User-Agent': 'Mozilla/5.0'
+        'Cookie': `.ROBLOSECURITY=${cookie};`
     };
     if (xsrf) headers['X-CSRF-TOKEN'] = xsrf;
 
-    let res = await fetch('https://www.roblox.com/game/join', {
+    let res = await fetchWithRetry('https://www.roblox.com/game/join', {
         method: 'POST',
         headers,
         body: new URLSearchParams({ placeId: placeId.toString() })
@@ -118,7 +140,7 @@ async function directJoin(cookie, placeId, xsrf) {
         const newXsrf = res.headers.get('x-csrf-token');
         if (newXsrf) {
             headers['X-CSRF-TOKEN'] = newXsrf;
-            res = await fetch('https://www.roblox.com/game/join', {
+            res = await fetchWithRetry('https://www.roblox.com/game/join', {
                 method: 'POST',
                 headers,
                 body: new URLSearchParams({ placeId: placeId.toString() })
@@ -143,7 +165,7 @@ async function serverJoin(cookie, universeId, placeId, xsrf) {
     let servers = null;
     for (const url of serverUrls) {
         try {
-            const res = await fetch(url, { headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` } });
+            const res = await fetchWithRetry(url, { headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` } });
             if (res.ok) {
                 const data = await res.json();
                 if (data.data?.length) { servers = data.data; break; }
@@ -157,12 +179,11 @@ async function serverJoin(cookie, universeId, placeId, xsrf) {
 
     const headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Cookie': `.ROBLOSECURITY=${cookie};`,
-        'User-Agent': 'Mozilla/5.0'
+        'Cookie': `.ROBLOSECURITY=${cookie};`
     };
     if (xsrf) headers['X-CSRF-TOKEN'] = xsrf;
 
-    let res = await fetch('https://www.roblox.com/game/join', {
+    let res = await fetchWithRetry('https://www.roblox.com/game/join', {
         method: 'POST',
         headers,
         body: new URLSearchParams({ placeId: placeId.toString(), jobId })
@@ -172,7 +193,7 @@ async function serverJoin(cookie, universeId, placeId, xsrf) {
         const newXsrf = res.headers.get('x-csrf-token');
         if (newXsrf) {
             headers['X-CSRF-TOKEN'] = newXsrf;
-            res = await fetch('https://www.roblox.com/game/join', {
+            res = await fetchWithRetry('https://www.roblox.com/game/join', {
                 method: 'POST',
                 headers,
                 body: new URLSearchParams({ placeId: placeId.toString(), jobId })
@@ -190,12 +211,11 @@ async function serverJoin(cookie, universeId, placeId, xsrf) {
 async function legacyJoin(cookie, placeId, xsrf) {
     const headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Cookie': `.ROBLOSECURITY=${cookie};`,
-        'User-Agent': 'Mozilla/5.0'
+        'Cookie': `.ROBLOSECURITY=${cookie};`
     };
     if (xsrf) headers['X-CSRF-TOKEN'] = xsrf;
 
-    let res = await fetch('https://www.roblox.com/game/join.ashx', {
+    let res = await fetchWithRetry('https://www.roblox.com/game/join.ashx', {
         method: 'POST',
         headers,
         body: new URLSearchParams({ placeId: placeId.toString() })
@@ -205,7 +225,7 @@ async function legacyJoin(cookie, placeId, xsrf) {
         const newXsrf = res.headers.get('x-csrf-token');
         if (newXsrf) {
             headers['X-CSRF-TOKEN'] = newXsrf;
-            res = await fetch('https://www.roblox.com/game/join.ashx', {
+            res = await fetchWithRetry('https://www.roblox.com/game/join.ashx', {
                 method: 'POST',
                 headers,
                 body: new URLSearchParams({ placeId: placeId.toString() })
@@ -220,14 +240,13 @@ async function legacyJoin(cookie, placeId, xsrf) {
     return { success: false };
 }
 
-// ================= الدالة الرئيسية للانضمام =================
+// ================= الدالة الرئيسية =================
 async function joinGame(cookie, placeId) {
     const universeId = await getUniverseId(placeId);
     if (!await isGamePublic(universeId)) throw new Error('اللعبة خاصة أو غير موجودة');
 
     const xsrf = await getXsrf(cookie);
 
-    // ترتيب الاستراتيجيات
     let result = await directJoin(cookie, placeId, xsrf);
     if (result.success) return result;
 
@@ -247,8 +266,8 @@ async function joinGame(cookie, placeId) {
 // --- start ---
 bot.onText(/\/start/, (msg) => {
     bot.sendMessage(msg.chat.id,
-        `🔥 *بوت Roblox – الإصدار النهائي* 🔥\n\n` +
-        `✅ تحويل placeId → universeId تلقائي\n` +
+        `🔥 *بوت Roblox – الإصدار المستقر* 🔥\n\n` +
+        `✅ يدعم إعادة المحاولة عند فشل الشبكة\n` +
         `✅ 3 استراتيجيات انضمام + تشخيص\n\n` +
         `📋 *الأوامر:*\n` +
         `/setcookie - إدخال كوكيز حساب وهمي\n` +
@@ -347,6 +366,7 @@ bot.onText(/\/joingame (\d+)/, async (msg, match) => {
             let errMsg = `❌ *فشل*\n${e.message}`;
             if (e.message.includes('401')) errMsg += '\n🔑 الكوكيز منتهي';
             if (e.message.includes('لا توجد خوادم')) errMsg += '\n🌐 لا توجد خوادم عامة';
+            if (e.message.includes('fetch failed')) errMsg += '\n📡 فشل الاتصال – حاول مجدداً';
             bot.sendMessage(chatId, errMsg, { parse_mode: 'Markdown' });
         }
     });
@@ -449,5 +469,5 @@ bot.on('polling_error', (err) => console.error('Polling error:', err.code));
 process.on('SIGINT', () => { db.close(); process.exit(); });
 process.on('SIGTERM', () => { db.close(); process.exit(); });
 
-console.log('✅ البوت جاهز – جميع الأقواس مغلقة');
+console.log('✅ البوت جاهز – مع إعادة محاولة الاتصال');
 // ================ نهاية الملف ================
