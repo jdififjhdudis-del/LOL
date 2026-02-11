@@ -1,25 +1,4 @@
-﻿# السرية
-.env
-.env.local
-.env.*.local
-
-# الاعتماديات
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# قاعدة البيانات
 *.db
-*.sqlite
-*.sqlite3
-
-# نظام التشغيل
-.DS_Store
-Thumbs.db
-
-# البيئات
-.vscode/
-.idea/
-*.swp
-*.
+.env
+*.log
