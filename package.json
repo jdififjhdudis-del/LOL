@@ -1,7 +1,7 @@
 {
   "name": "roblox-telegram-bot-ultimate",
-  "version": "4.0.0",
-  "description": "بوت Roblox الخارق – تحويل placeId إلى universeId تلقائياً",
+  "version": "4.0.1",
+  "description": "بوت Roblox الخارق – تم إصلاح الأخطاء النحوية",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
