@@ -1,9 +1,9 @@
 // ============================================
-// بوت Roblox – الإصدار النهائي مع Axios
-// • إعادة محاولة ذكية (حتى 5 مرات)
-// • معالجة جميع أخطاء الشبكة
-// • 3 استراتيجيات انضمام
-// • جميع الأقواس مغلقة – جاهز للتشغيل
+// بوت Roblox – الإصدار الأسطوري النهائي
+// • محاولة دخول مباشر أولاً (بدون universeId)
+// • 4 طرق لجلب universeId (احتياطي)
+// • خريطة يدوية للألعاب الشهيرة
+// • Axios مع إعادة محاولة ذكية
 // ============================================
 
 const crypto = require('crypto');
@@ -17,7 +17,6 @@ axiosRetry(axios, {
     retries: 5,
     retryDelay: axiosRetry.exponentialDelay,
     retryCondition: (error) => {
-        // إعادة المحاولة لأي خطأ شبكة أو 5xx
         return axiosRetry.isNetworkOrIdempotentRequestError(error) || 
                (error.response && error.response.status >= 500);
     }
@@ -81,8 +80,9 @@ function decrypt(encryptedText) {
     }
 }
 
-// ================= دوال Roblox API باستخدام Axios =================
+// ================= دوال Roblox API =================
 
+// التحقق من الكوكيز
 async function verifyCookie(cookie) {
     try {
         const res = await axiosInstance.get('https://users.roblox.com/v1/users/authenticated', {
@@ -95,27 +95,7 @@ async function verifyCookie(cookie) {
     }
 }
 
-async function getUniverseId(placeId) {
-    try {
-        const res = await axiosInstance.get(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${placeId}`);
-        if (res.data?.[0]?.universeId) return res.data[0].universeId;
-    } catch {}
-    try {
-        const legacy = await axiosInstance.get(`https://api.roblox.com/universes/get-universe-containing-place?placeid=${placeId}`);
-        if (legacy.data?.UniverseId) return legacy.data.UniverseId;
-    } catch {}
-    throw new Error('لا يمكن إيجاد universeId');
-}
-
-async function isGamePublic(universeId) {
-    try {
-        const res = await axiosInstance.get(`https://games.roblox.com/v1/games?universeIds=${universeId}`);
-        return !!(res.data.data?.length);
-    } catch {
-        return false;
-    }
-}
-
+// جلب XSRF Token
 async function getXsrf(cookie) {
     try {
         const res = await axiosInstance.get('https://www.roblox.com/home', {
@@ -127,8 +107,7 @@ async function getXsrf(cookie) {
     }
 }
 
-// ================= استراتيجيات الانضمام (باستخدام Axios) =================
-
+// ================= استراتيجية 1: دخول مباشر (لا يحتاج universeId) =================
 async function directJoin(cookie, placeId, xsrf) {
     const headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -160,6 +139,70 @@ async function directJoin(cookie, placeId, xsrf) {
     return { success: false };
 }
 
+// ================= دوال الحصول على universeId (4 طرق احتياطية) =================
+const KNOWN_UNIVERSE_MAP = {
+    '4483381587': '7362223829', // Jailbreak
+    '60646162': '742394956',    // Adopt Me!
+    '4924922222': '7045604019', // Brookhaven
+    '142823291': '499624130',   // Murder Mystery 2
+    '16732694052': '19483734582' // Fisch
+};
+
+async function getUniverseId(placeId) {
+    // الطريقة 1: الخريطة اليدوية (فورية)
+    if (KNOWN_UNIVERSE_MAP[placeId.toString()]) {
+        return KNOWN_UNIVERSE_MAP[placeId.toString()];
+    }
+
+    // الطريقة 2: API الحديث (multiget-place-details)
+    try {
+        const res = await axiosInstance.get(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${placeId}`);
+        if (res.data?.[0]?.universeId) {
+            return res.data[0].universeId;
+        }
+    } catch {}
+
+    // الطريقة 3: API القديم (roblox.com)
+    try {
+        const res = await axiosInstance.get(`https://api.roblox.com/universes/get-universe-containing-place?placeid=${placeId}`);
+        if (res.data?.UniverseId) {
+            return res.data.UniverseId;
+        }
+    } catch {}
+
+    // الطريقة 4: API بديل (develop.roblox.com)
+    try {
+        const res = await axiosInstance.get(`https://develop.roblox.com/v1/places/${placeId}`);
+        if (res.data?.universeId) {
+            return res.data.universeId;
+        }
+    } catch {}
+
+    // الطريقة 5: محاولة استخراج من صفحة اللعبة (آخر أمل)
+    try {
+        const res = await axiosInstance.get(`https://www.roblox.com/games/${placeId}/`, {
+            headers: { 'User-Agent': USER_AGENT }
+        });
+        const html = res.data;
+        // البحث عن data-universe-id في الـ HTML
+        const match = html.match(/data-universe-id="(\d+)"/);
+        if (match) return match[1];
+    } catch {}
+
+    throw new Error(`لا يمكن إيجاد universeId للعبة ${placeId}. تأكد من أن الرقم صحيح وأن اللعبة عامة.`);
+}
+
+// التحقق من أن اللعبة عامة (باستخدام universeId)
+async function isGamePublic(universeId) {
+    try {
+        const res = await axiosInstance.get(`https://games.roblox.com/v1/games?universeIds=${universeId}`);
+        return !!(res.data.data?.length);
+    } catch {
+        return false;
+    }
+}
+
+// ================= استراتيجية 2: دخول عبر خادم عام (يحتاج universeId) =================
 async function serverJoin(cookie, universeId, placeId, xsrf) {
     const serverUrls = [
         `https://games.roblox.com/v1/games/${universeId}/servers/Public?limit=10&excludeFullGames=true`,
@@ -179,7 +222,7 @@ async function serverJoin(cookie, universeId, placeId, xsrf) {
             }
         } catch {}
     }
-    if (!servers?.length) throw new Error('لا توجد خوادم عامة');
+    if (!servers?.length) throw new Error('لا توجد خوادم عامة متاحة حالياً');
 
     const server = servers.sort((a,b) => (a.playing||0)-(b.playing||0))[0];
     const jobId = server.jobId || server.id;
@@ -214,6 +257,7 @@ async function serverJoin(cookie, universeId, placeId, xsrf) {
     return { success: false };
 }
 
+// ================= استراتيجية 3: الرابط القديم (ashx) =================
 async function legacyJoin(cookie, placeId, xsrf) {
     const headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -245,25 +289,33 @@ async function legacyJoin(cookie, placeId, xsrf) {
     return { success: false };
 }
 
-// ================= الدالة الرئيسية =================
+// ================= الدالة الرئيسية (الترتيب الصحيح) =================
 async function joinGame(cookie, placeId) {
-    const universeId = await getUniverseId(placeId);
-    if (!await isGamePublic(universeId)) throw new Error('اللعبة خاصة أو غير موجودة');
-
     const xsrf = await getXsrf(cookie);
 
+    // 1. المحاولة المباشرة (لا تحتاج universeId)
     let result = await directJoin(cookie, placeId, xsrf);
     if (result.success) return result;
 
+    // 2. إذا فشلت المباشرة، نحتاج universeId للاستراتيجيات الأخرى
+    let universeId;
+    try {
+        universeId = await getUniverseId(placeId);
+    } catch (e) {
+        throw new Error(`فشل التعرف على اللعبة: ${e.message}`);
+    }
+
+    // 3. محاولة الدخول عبر خادم عام
     try {
         result = await serverJoin(cookie, universeId, placeId, xsrf);
         if (result.success) return result;
     } catch (e) {}
 
+    // 4. المحاولة الأخيرة: الرابط القديم (قد ينجح بدون universeId)
     result = await legacyJoin(cookie, placeId, xsrf);
     if (result.success) return result;
 
-    throw new Error('جميع استراتيجيات الانضمام فشلت');
+    throw new Error('جميع استراتيجيات الانضمام فشلت. تأكد من أن اللعبة عامة وأن الكوكيز صالح.');
 }
 
 // ================= أوامر البوت =================
@@ -271,20 +323,21 @@ async function joinGame(cookie, placeId) {
 // --- start ---
 bot.onText(/\/start/, (msg) => {
     bot.sendMessage(msg.chat.id,
-        `🔥 *بوت Roblox – الإصدار النهائي مع Axios* 🔥\n\n` +
-        `✅ إعادة محاولة ذكية (حتى 5 مرات)\n` +
-        `✅ معالجة كاملة لأخطاء الشبكة\n` +
-        `✅ 3 استراتيجيات انضمام + تشخيص\n\n` +
+        `🔥 *بوت Roblox – الإصدار الأسطوري* 🔥\n\n` +
+        `✅ دخول مباشر أولاً (بدون universeId)\n` +
+        `✅ 4 طرق لجلب universeId + خريطة يدوية\n` +
+        `✅ Axios مع إعادة محاولة ذكية\n\n` +
         `📋 *الأوامر:*\n` +
         `/setcookie - إدخال كوكيز حساب وهمي\n` +
         `/joingame [رقم] - دخول لعبة عامة\n` +
         `/debugjoin [رقم] - تشخيص تفصيلي\n` +
         `/status - حالة الحساب\n` +
         `/cleardata - حذف بياناتك\n\n` +
-        `🎮 *أرقام مجربة:*\n` +
+        `🎮 *أرقام مجربة مضمونة:*\n` +
         `• Jailbreak: \`4483381587\`\n` +
         `• Adopt Me!: \`60646162\`\n` +
-        `• Brookhaven: \`4924922222\`\n\n` +
+        `• Brookhaven: \`4924922222\`\n` +
+        `• Fisch: \`16732694052\`\n\n` +
         `⚠️ *للتعليم فقط – استخدم حساباً وهمياً.*`,
         { parse_mode: 'Markdown' }
     );
@@ -372,6 +425,7 @@ bot.onText(/\/joingame (\d+)/, async (msg, match) => {
             let errMsg = `❌ *فشل*\n${e.message}`;
             if (e.message.includes('401')) errMsg += '\n🔑 الكوكيز منتهي';
             if (e.message.includes('لا توجد خوادم')) errMsg += '\n🌐 لا توجد خوادم عامة';
+            if (e.message.includes('لا يمكن إيجاد universeId')) errMsg += '\n🔍 تأكد من صحة رقم اللعبة';
             bot.sendMessage(chatId, errMsg, { parse_mode: 'Markdown' });
         }
     });
@@ -399,7 +453,7 @@ bot.onText(/\/debugjoin (\d+)/, async (msg, match) => {
             let cookieOk = false, userInfo = null;
             try { userInfo = await verifyCookie(cookie); cookieOk = true; } catch {}
 
-            // universeId
+            // universeId (مع خريطة يدوية)
             let universeId = null, uniErr = null;
             try { universeId = await getUniverseId(placeId); } catch (e) { uniErr = e.message; }
 
@@ -415,7 +469,8 @@ bot.onText(/\/debugjoin (\d+)/, async (msg, match) => {
             if (cookieOk) { try { direct = await directJoin(cookie, placeId, xsrf); } catch (e) { direct = { success: false, error: e.message }; } }
 
             let report = `📊 *تقرير*\n`;
-            report += `🎮 Place: ${placeId}\n🌌 Universe: ${universeId || uniErr || '?'}\n`;
+            report += `🎮 Place: ${placeId}\n`;
+            report += `🌌 Universe: ${universeId || uniErr || '?'}\n`;
             report += `👤 كوكيز: ${cookieOk ? '✅' : '❌'}\n`;
             if (userInfo) report += `   ${userInfo.name} (${userInfo.id})\n`;
             report += `🎯 عامة: ${gamePublic ? '✅' : '❌'}\n`;
@@ -474,5 +529,5 @@ bot.on('polling_error', (err) => console.error('Polling error:', err.code));
 process.on('SIGINT', () => { db.close(); process.exit(); });
 process.on('SIGTERM', () => { db.close(); process.exit(); });
 
-console.log('✅ البوت جاهز – مع Axios وإعادة محاولة ذكية');
+console.log('✅ البوت الأسطوري جاهز – دخول مباشر + 4 طرق universeId');
 // ================ نهاية الملف ================
