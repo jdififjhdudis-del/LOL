@@ -544,4 +544,4 @@ bot.onText(/\/cleardata/, (msg) => {
 
     db.run(`DELETE FROM sessions WHERE user_id = ?`, [userId], function(err) {
         if (this.changes > 0) {
-            bot.sendMessage(chatId, '🗑️ *تم حذف جميع بياناتك من الذاكرة.*', { parse_mode: 'Markdow
+            bot.sendMessage(chatId, '🗑️ *تم حذف جميع بياناتك من الذاكرة.*', { parse_mode: 'Markdown' });
