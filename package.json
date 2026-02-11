@@ -1,17 +1,16 @@
 {
-  "name": "telegram-roblox-bot-secure",
-  "version": "1.0.0",
-  "description": "تعليمي فقط – بوت روبلوكس بتشفير داخلي",
+  "name": "telegram-roblox-bot-final",
+  "version": "2.0.0",
+  "description": "بوت تليجرام للدخول إلى Roblox – بدون noblox.js",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.61.0",
-    "noblox.js": "^4.13.1",
     "sqlite3": "^5.1.4"
   },
-  "keywords": ["roblox", "telegram", "educational"],
+  "keywords": ["roblox", "telegram", "fetch"],
   "author": "للتعليم فقط",
   "license": "MIT"
 }
