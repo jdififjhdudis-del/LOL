@@ -1,7 +1,7 @@
 {
   "name": "telegram-roblox-bot-final",
-  "version": "2.0.0",
-  "description": "بوت تليجرام للدخول إلى Roblox – بدون noblox.js",
+  "version": "3.0.0",
+  "description": "بوت تليجرام – يدعم رابط Roblox الجديد",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
