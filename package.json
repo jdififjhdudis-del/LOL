@@ -1,0 +1,18 @@
+{
+  "name": "telegram-roblox-bot-demo",
+  "version": "0.1.0",
+  "description": "DEMO ONLY - Educational project showing Telegram-Roblox integration",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.61.0",
+    "noblox.js": "^4.13.1",
+    "sqlite3": "^5.1.4",
+    "axios": "^1.6.0"
+  },
+  "keywords": ["demo", "educational", "telegram-bot"],
+  "author": "Educational Demo",
+  "license": "MIT"
+}
