@@ -1,36 +1,97 @@
-import os
 import telebot
 import requests
+import json
+import time
+import os
+from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# 🔹 التوكن من متغير البيئة
-TOKEN = os.getenv("BOT_TOKEN")
-if not TOKEN:
-    raise ValueError("⚠️ لم يتم العثور على BOT_TOKEN في Environment Variables!")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GAMEPASS_ID = 1708536288
 
-bot = telebot.TeleBot(TOKEN)
-HEADERS = {"User-Agent": "RobloxLookupBot"}
+bot = telebot.TeleBot(BOT_TOKEN)
+HEADERS = {"User-Agent": "RBXEliteScannerV3"}
 
-# 🔹 دالة للحصول على UserID من اسم الحساب
+DATA_FILE = "premium_users.json"
+
+# تحميل بيانات المشتركين
+try:
+    with open(DATA_FILE, "r") as f:
+        premium_users = json.load(f)
+except:
+    premium_users = {}
+
+def save_data():
+    with open(DATA_FILE, "w") as f:
+        json.dump(premium_users, f)
+
 def get_user_id(username):
     url = "https://users.roblox.com/v1/usernames/users"
     data = {"usernames": [username], "excludeBannedUsers": False}
     r = requests.post(url, json=data, headers=HEADERS)
-    if r.status_code != 200 or not r.json().get("data"):
+    if r.status_code != 200:
         return None
-    return r.json()["data"][0]["id"]
+    js = r.json()
+    if not js.get("data"):
+        return None
+    return js["data"][0]["id"]
 
-# 🔹 أمر /start
+def check_gamepass(user_id):
+    url = f"https://inventory.roblox.com/v1/users/{user_id}/items/GamePass/{GAMEPASS_ID}"
+    r = requests.get(url, headers=HEADERS)
+    data = r.json()
+    return len(data.get("data", [])) > 0
+
+def is_premium(chat_id):
+    chat_id = str(chat_id)
+    if chat_id in premium_users:
+        if time.time() < premium_users[chat_id]:
+            return True
+        else:
+            del premium_users[chat_id]
+            save_data()
+    return False
+
 @bot.message_handler(commands=["start"])
 def start(message):
-    bot.reply_to(
-        message,
-        "👋 أهلاً!\n\n"
-        "🔍 أرسل اسم حساب روبلوكس فقط\n"
-        "وسأعطيك كل معلوماته العامة + أزرار"
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("💎 شراء Premium",
+            url=f"https://www.roblox.com/game-pass/{GAMEPASS_ID}/"),
+        InlineKeyboardButton("🔓 تحقق", callback_data="verify")
     )
 
-# 🔹 البحث عن الحساب
+    bot.send_message(
+        message.chat.id,
+        "👑 RBX Elite Scanner\n\n"
+        "💰 الاشتراك: 100 Robux / شهر\n"
+        "⏳ مدة التفعيل: 30 يوم\n\n"
+        "اشتري الجيم باس ثم اضغط تحقق",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data == "verify")
+def verify(call):
+    bot.send_message(call.message.chat.id,
+                     "🔎 ارسل يوزر روبلوكس للتحقق")
+    bot.register_next_step_handler(call.message, process_verification)
+
+def process_verification(message):
+    username = message.text.strip()
+    user_id = get_user_id(username)
+
+    if not user_id:
+        bot.reply_to(message, "❌ الحساب غير موجود")
+        return
+
+    if check_gamepass(user_id):
+        expire_time = time.time() + (30 * 24 * 60 * 60)
+        premium_users[str(message.chat.id)] = expire_time
+        save_data()
+        bot.reply_to(message, "✅ تم تفعيل Premium لمدة 30 يوم 👑")
+    else:
+        bot.reply_to(message, "❌ الجيم باس غير موجود في الحساب")
+
 @bot.message_handler(func=lambda m: True)
 def lookup(message):
     username = message.text.strip()
@@ -40,68 +101,46 @@ def lookup(message):
         bot.reply_to(message, "❌ الحساب غير موجود")
         return
 
-    # معلومات الحساب
     info = requests.get(
         f"https://users.roblox.com/v1/users/{user_id}",
         headers=HEADERS
     ).json()
 
-    # أرقام الأصدقاء والمتابعين
-    friends = requests.get(f"https://friends.roblox.com/v1/users/{user_id}/friends/count", headers=HEADERS).json().get("count", 0)
-    followers = requests.get(f"https://friends.roblox.com/v1/users/{user_id}/followers/count", headers=HEADERS).json().get("count", 0)
-    following = requests.get(f"https://friends.roblox.com/v1/users/{user_id}/followings/count", headers=HEADERS).json().get("count", 0)
+    created = info.get("created", "N/A")
+    age_days = "غير متوفر"
 
-    # مجموعات وبادجات وألعاب
-    groups = requests.get(f"https://groups.roblox.com/v1/users/{user_id}/groups/roles", headers=HEADERS).json().get("data", [])
-    badges = requests.get(f"https://badges.roblox.com/v1/users/{user_id}/badges?limit=100", headers=HEADERS).json().get("data", [])
-    games = requests.get(f"https://games.roblox.com/v2/users/{user_id}/games?limit=10", headers=HEADERS).json().get("data", [])
+    if created != "N/A":
+        created_date = datetime.strptime(created[:10], "%Y-%m-%d")
+        age_days = (datetime.utcnow() - created_date).days
 
-    last_game_name = "غير متوفر"
-    last_game_url = f"https://www.roblox.com/users/{user_id}/profile"
-    if games:
-        last_game_name = games[0].get("name", "غير متوفر")
-        last_game_url = f"https://www.roblox.com/games/{games[0].get('rootPlaceId')}"
-
-    # صورة الحساب
-    avatar = requests.get(
-        "https://thumbnails.roblox.com/v1/users/avatar-headshot",
-        params={"userIds": user_id, "size": "420x420", "format": "Png", "isCircular": "false"},
-        headers=HEADERS
-    ).json()["data"][0]["imageUrl"]
-
-    # النص الذي سيظهر
     text = (
-        f"🔍 Roblox Account Info\n\n"
-        f"👤 Username: {info.get('name', 'N/A')}\n"
-        f"📛 Display Name: {info.get('displayName', 'N/A')}\n"
-        f"🆔 User ID: {user_id}\n"
-        f"📅 Created: {info.get('created', 'N/A')[:10]}\n"
-        f"📝 Bio: {info.get('description') or 'لا يوجد'}\n"
-        f"🤖 Banned: {info.get('isBanned', 'غير معروف')}\n"
-        f"👶 Under 13: {info.get('isUnder13', 'غير متوفر')}\n\n"
-        f"👥 Friends: {friends}\n"
-        f"👀 Followers: {followers}\n"
-        f"👣 Following: {following}\n"
-        f"🏘 Groups: {len(groups)}\n"
-        f"🏅 Badges: {len(badges)}\n"
-        f"🧱 Games Created: {len(games)}\n"
-        f"🎮 Last Game: {last_game_name}"
+        f"👤 Username: {info.get('name','N/A')}\n"
+        f"🆔 ID: {user_id}\n"
+        f"📅 Created: {created[:10] if created!='N/A' else 'N/A'}\n"
     )
 
-    # الأزرار
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(
-        InlineKeyboardButton("👤 Profile", url=f"https://www.roblox.com/users/{user_id}/profile"),
-        InlineKeyboardButton("🎮 Open Game", url=last_game_url)
-    )
+    if is_premium(message.chat.id):
+        friends = requests.get(
+            f"https://friends.roblox.com/v1/users/{user_id}/friends/count",
+            headers=HEADERS
+        ).json().get("count", 0)
 
-    # إرسال الصورة مع النص والأزرار
-    bot.send_photo(
-        message.chat.id,
-        avatar,
-        caption=text,
-        reply_markup=keyboard
-    )
+        followers = requests.get(
+            f"https://friends.roblox.com/v1/users/{user_id}/followers/count",
+            headers=HEADERS
+        ).json().get("count", 0)
 
-# 🔹 تشغيل البوت 24/7
+        text += (
+            f"\n💎 Premium Data:\n"
+            f"👥 Friends: {friends}\n"
+            f"👀 Followers: {followers}\n"
+            f"📆 عمر الحساب: {age_days} يوم\n"
+            f"🚫 Banned: {info.get('isBanned','غير معروف')}\n"
+        )
+    else:
+        text += "\n🔒 المعلومات المتقدمة للمشتركين فقط"
+
+    bot.reply_to(message, text)
+
+print("Bot Running...")
 bot.infinity_polling()
