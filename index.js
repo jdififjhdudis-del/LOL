@@ -1,14 +1,38 @@
 // ============================================
-// بوت Roblox – الإصدار المستقر النهائي
-// • معالجة fetch failed عبر إعادة المحاولة
-// • User-Agent قوي يحاكي Chrome
-// • 3 استراتيجيات انضمام مع fallback
+// بوت Roblox – الإصدار النهائي مع Axios
+// • إعادة محاولة ذكية (حتى 5 مرات)
+// • معالجة جميع أخطاء الشبكة
+// • 3 استراتيجيات انضمام
 // • جميع الأقواس مغلقة – جاهز للتشغيل
 // ============================================
 
 const crypto = require('crypto');
 const TelegramBot = require('node-telegram-bot-api');
 const sqlite3 = require('sqlite3').verbose();
+const axios = require('axios');
+const axiosRetry = require('axios-retry');
+
+// ------------------- إعداد Axios مع إعادة المحاولة -------------------
+axiosRetry(axios, {
+    retries: 5,
+    retryDelay: axiosRetry.exponentialDelay,
+    retryCondition: (error) => {
+        // إعادة المحاولة لأي خطأ شبكة أو 5xx
+        return axiosRetry.isNetworkOrIdempotentRequestError(error) || 
+               (error.response && error.response.status >= 500);
+    }
+});
+
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const axiosInstance = axios.create({
+    timeout: 30000,
+    headers: {
+        'User-Agent': USER_AGENT,
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Connection': 'keep-alive'
+    }
+});
 
 // ------------------- متغيرات البيئة -------------------
 if (!process.env.TELEGRAM_TOKEN) {
@@ -57,72 +81,54 @@ function decrypt(encryptedText) {
     }
 }
 
-// ================= دوال Roblox API مع إعادة محاولة =================
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-const MAX_RETRIES = 3;
-
-async function fetchWithRetry(url, options = {}, retries = MAX_RETRIES) {
-    for (let i = 0; i < retries; i++) {
-        try {
-            const res = await fetch(url, {
-                ...options,
-                headers: {
-                    'User-Agent': USER_AGENT,
-                    'Accept': 'application/json, text/plain, */*',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    ...options.headers
-                }
-            });
-            return res;
-        } catch (err) {
-            if (i === retries - 1) throw err;
-            await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
-        }
-    }
-}
+// ================= دوال Roblox API باستخدام Axios =================
 
 async function verifyCookie(cookie) {
-    const res = await fetchWithRetry('https://users.roblox.com/v1/users/authenticated', {
-        headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` }
-    });
-    if (!res.ok) throw new Error(res.status === 401 ? 'الكوكيز منتهي' : `HTTP ${res.status}`);
-    const data = await res.json();
-    return { name: data.name, id: data.id, display: data.displayName || data.name };
+    try {
+        const res = await axiosInstance.get('https://users.roblox.com/v1/users/authenticated', {
+            headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` }
+        });
+        return { name: res.data.name, id: res.data.id, display: res.data.displayName || res.data.name };
+    } catch (err) {
+        if (err.response?.status === 401) throw new Error('الكوكيز منتهي');
+        throw new Error(`HTTP ${err.response?.status || 'Network Error'}: ${err.message}`);
+    }
 }
 
 async function getUniverseId(placeId) {
-    const res = await fetchWithRetry(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${placeId}`);
-    if (res.ok) {
-        const data = await res.json();
-        if (data?.[0]?.universeId) return data[0].universeId;
-    }
-    const legacy = await fetchWithRetry(`https://api.roblox.com/universes/get-universe-containing-place?placeid=${placeId}`);
-    if (legacy.ok) {
-        const data = await legacy.json();
-        if (data.UniverseId) return data.UniverseId;
-    }
+    try {
+        const res = await axiosInstance.get(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${placeId}`);
+        if (res.data?.[0]?.universeId) return res.data[0].universeId;
+    } catch {}
+    try {
+        const legacy = await axiosInstance.get(`https://api.roblox.com/universes/get-universe-containing-place?placeid=${placeId}`);
+        if (legacy.data?.UniverseId) return legacy.data.UniverseId;
+    } catch {}
     throw new Error('لا يمكن إيجاد universeId');
 }
 
 async function isGamePublic(universeId) {
-    const res = await fetchWithRetry(`https://games.roblox.com/v1/games?universeIds=${universeId}`);
-    if (!res.ok) return false;
-    const data = await res.json();
-    return !!(data.data?.length);
+    try {
+        const res = await axiosInstance.get(`https://games.roblox.com/v1/games?universeIds=${universeId}`);
+        return !!(res.data.data?.length);
+    } catch {
+        return false;
+    }
 }
 
 async function getXsrf(cookie) {
     try {
-        const res = await fetchWithRetry('https://www.roblox.com/home', {
+        const res = await axiosInstance.get('https://www.roblox.com/home', {
             headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` }
         });
-        return res.headers.get('x-csrf-token') || '';
+        return res.headers['x-csrf-token'] || '';
     } catch {
         return '';
     }
 }
 
-// ================= استراتيجيات الانضمام (محسنة) =================
+// ================= استراتيجيات الانضمام (باستخدام Axios) =================
+
 async function directJoin(cookie, placeId, xsrf) {
     const headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -130,27 +136,26 @@ async function directJoin(cookie, placeId, xsrf) {
     };
     if (xsrf) headers['X-CSRF-TOKEN'] = xsrf;
 
-    let res = await fetchWithRetry('https://www.roblox.com/game/join', {
-        method: 'POST',
-        headers,
-        body: new URLSearchParams({ placeId: placeId.toString() })
-    });
-
-    if (res.status === 403) {
-        const newXsrf = res.headers.get('x-csrf-token');
-        if (newXsrf) {
-            headers['X-CSRF-TOKEN'] = newXsrf;
-            res = await fetchWithRetry('https://www.roblox.com/game/join', {
-                method: 'POST',
-                headers,
-                body: new URLSearchParams({ placeId: placeId.toString() })
-            });
+    try {
+        const res = await axiosInstance.post('https://www.roblox.com/game/join', 
+            new URLSearchParams({ placeId: placeId.toString() }).toString(),
+            { headers }
+        );
+        if (res.data?.includes('OK')) return { success: true, method: 'direct' };
+    } catch (err) {
+        if (err.response?.status === 403) {
+            const newXsrf = err.response.headers['x-csrf-token'];
+            if (newXsrf) {
+                headers['X-CSRF-TOKEN'] = newXsrf;
+                try {
+                    const retry = await axiosInstance.post('https://www.roblox.com/game/join',
+                        new URLSearchParams({ placeId: placeId.toString() }).toString(),
+                        { headers }
+                    );
+                    if (retry.data?.includes('OK')) return { success: true, method: 'direct' };
+                } catch {}
+            }
         }
-    }
-
-    if (res.ok) {
-        const text = await res.text();
-        if (text.includes('OK')) return { success: true, method: 'direct' };
     }
     return { success: false };
 }
@@ -165,10 +170,12 @@ async function serverJoin(cookie, universeId, placeId, xsrf) {
     let servers = null;
     for (const url of serverUrls) {
         try {
-            const res = await fetchWithRetry(url, { headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` } });
-            if (res.ok) {
-                const data = await res.json();
-                if (data.data?.length) { servers = data.data; break; }
+            const res = await axiosInstance.get(url, {
+                headers: { 'Cookie': `.ROBLOSECURITY=${cookie};` }
+            });
+            if (res.data.data?.length) {
+                servers = res.data.data;
+                break;
             }
         } catch {}
     }
@@ -183,27 +190,26 @@ async function serverJoin(cookie, universeId, placeId, xsrf) {
     };
     if (xsrf) headers['X-CSRF-TOKEN'] = xsrf;
 
-    let res = await fetchWithRetry('https://www.roblox.com/game/join', {
-        method: 'POST',
-        headers,
-        body: new URLSearchParams({ placeId: placeId.toString(), jobId })
-    });
-
-    if (res.status === 403) {
-        const newXsrf = res.headers.get('x-csrf-token');
-        if (newXsrf) {
-            headers['X-CSRF-TOKEN'] = newXsrf;
-            res = await fetchWithRetry('https://www.roblox.com/game/join', {
-                method: 'POST',
-                headers,
-                body: new URLSearchParams({ placeId: placeId.toString(), jobId })
-            });
+    try {
+        const res = await axiosInstance.post('https://www.roblox.com/game/join',
+            new URLSearchParams({ placeId: placeId.toString(), jobId }).toString(),
+            { headers }
+        );
+        if (res.data?.includes('OK')) return { success: true, method: 'server', jobId };
+    } catch (err) {
+        if (err.response?.status === 403) {
+            const newXsrf = err.response.headers['x-csrf-token'];
+            if (newXsrf) {
+                headers['X-CSRF-TOKEN'] = newXsrf;
+                try {
+                    const retry = await axiosInstance.post('https://www.roblox.com/game/join',
+                        new URLSearchParams({ placeId: placeId.toString(), jobId }).toString(),
+                        { headers }
+                    );
+                    if (retry.data?.includes('OK')) return { success: true, method: 'server', jobId };
+                } catch {}
+            }
         }
-    }
-
-    if (res.ok) {
-        const text = await res.text();
-        if (text.includes('OK')) return { success: true, method: 'server', jobId };
     }
     return { success: false };
 }
@@ -215,27 +221,26 @@ async function legacyJoin(cookie, placeId, xsrf) {
     };
     if (xsrf) headers['X-CSRF-TOKEN'] = xsrf;
 
-    let res = await fetchWithRetry('https://www.roblox.com/game/join.ashx', {
-        method: 'POST',
-        headers,
-        body: new URLSearchParams({ placeId: placeId.toString() })
-    });
-
-    if (res.status === 403) {
-        const newXsrf = res.headers.get('x-csrf-token');
-        if (newXsrf) {
-            headers['X-CSRF-TOKEN'] = newXsrf;
-            res = await fetchWithRetry('https://www.roblox.com/game/join.ashx', {
-                method: 'POST',
-                headers,
-                body: new URLSearchParams({ placeId: placeId.toString() })
-            });
+    try {
+        const res = await axiosInstance.post('https://www.roblox.com/game/join.ashx',
+            new URLSearchParams({ placeId: placeId.toString() }).toString(),
+            { headers }
+        );
+        if (res.data?.includes('OK')) return { success: true, method: 'legacy' };
+    } catch (err) {
+        if (err.response?.status === 403) {
+            const newXsrf = err.response.headers['x-csrf-token'];
+            if (newXsrf) {
+                headers['X-CSRF-TOKEN'] = newXsrf;
+                try {
+                    const retry = await axiosInstance.post('https://www.roblox.com/game/join.ashx',
+                        new URLSearchParams({ placeId: placeId.toString() }).toString(),
+                        { headers }
+                    );
+                    if (retry.data?.includes('OK')) return { success: true, method: 'legacy' };
+                } catch {}
+            }
         }
-    }
-
-    if (res.ok) {
-        const text = await res.text();
-        if (text.includes('OK')) return { success: true, method: 'legacy' };
     }
     return { success: false };
 }
@@ -266,8 +271,9 @@ async function joinGame(cookie, placeId) {
 // --- start ---
 bot.onText(/\/start/, (msg) => {
     bot.sendMessage(msg.chat.id,
-        `🔥 *بوت Roblox – الإصدار المستقر* 🔥\n\n` +
-        `✅ يدعم إعادة المحاولة عند فشل الشبكة\n` +
+        `🔥 *بوت Roblox – الإصدار النهائي مع Axios* 🔥\n\n` +
+        `✅ إعادة محاولة ذكية (حتى 5 مرات)\n` +
+        `✅ معالجة كاملة لأخطاء الشبكة\n` +
         `✅ 3 استراتيجيات انضمام + تشخيص\n\n` +
         `📋 *الأوامر:*\n` +
         `/setcookie - إدخال كوكيز حساب وهمي\n` +
@@ -366,7 +372,6 @@ bot.onText(/\/joingame (\d+)/, async (msg, match) => {
             let errMsg = `❌ *فشل*\n${e.message}`;
             if (e.message.includes('401')) errMsg += '\n🔑 الكوكيز منتهي';
             if (e.message.includes('لا توجد خوادم')) errMsg += '\n🌐 لا توجد خوادم عامة';
-            if (e.message.includes('fetch failed')) errMsg += '\n📡 فشل الاتصال – حاول مجدداً';
             bot.sendMessage(chatId, errMsg, { parse_mode: 'Markdown' });
         }
     });
@@ -469,5 +474,5 @@ bot.on('polling_error', (err) => console.error('Polling error:', err.code));
 process.on('SIGINT', () => { db.close(); process.exit(); });
 process.on('SIGTERM', () => { db.close(); process.exit(); });
 
-console.log('✅ البوت جاهز – مع إعادة محاولة الاتصال');
+console.log('✅ البوت جاهز – مع Axios وإعادة محاولة ذكية');
 // ================ نهاية الملف ================
